@@ -1,0 +1,26 @@
+{
+  "name": "pcrobots",
+  "private": true,
+  "packageManager": "npm@11.9.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present",
+    "dev:web": "npm run dev --workspace @pcrobots/web",
+    "dev:api": "npm run dev --workspace @pcrobots/api",
+    "dev:worker": "npm run dev --workspace @pcrobots/worker",
+    "test": "npm run test --workspace @pcrobots/platform",
+    "local:smoke": "node scripts/local_smoke.mjs",
+    "compose:up": "docker compose up -d --build",
+    "compose:down": "docker compose down"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/pg": "^8.20.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.8.3"
+  }
+}

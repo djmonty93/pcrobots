@@ -1,0 +1,15 @@
+{
+  "name": "@pcrobots/replay-format",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/replay-format/src/index.js",
+  "types": "./dist/replay-format/src/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@pcrobots/engine": "0.1.0"
+  }
+}

@@ -1,0 +1,8 @@
+# syntax=docker/dockerfile:1
+node_modules
+.git
+.gitignore
+dist
+coverage
+postgres-data
+redis-data
