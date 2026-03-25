@@ -184,6 +184,21 @@ function getTournamentStatusLine(tournament: TournamentRecord): string {
   return "No leader yet";
 }
 
+type Tab = 'bots' | 'arenas' | 'matches' | 'compete';
+
+function StatRow(props: { chips: Array<{ label: string; value: number | string }> }) {
+  return (
+    <div className="stat-row">
+      {props.chips.map((chip) => (
+        <div key={chip.label} className="stat-chip">
+          <div className="stat-chip-label">{chip.label}</div>
+          <div className="stat-chip-value">{chip.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function App() {
   const [bots, setBots] = useState<BotRecord[]>([]);
   const [arenas, setArenas] = useState<ArenaRecord[]>([]);
@@ -200,6 +215,31 @@ export function App() {
   const [matchForm, setMatchForm] = useState(createInitialMatchState);
   const [ladderForm, setLadderForm] = useState(createInitialLadderState);
   const [tournamentForm, setTournamentForm] = useState(createInitialTournamentState);
+
+  const [activeTab, setActiveTab] = useState<Tab>('bots');
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    let initial: 'dark' | 'light' = 'dark';
+    try {
+      initial = (localStorage.getItem('pcrobots-theme') as 'dark' | 'light' | null) ?? 'dark';
+    } catch {
+      // localStorage unavailable (sandboxed iframe, strict privacy settings)
+    }
+    document.documentElement.setAttribute('data-theme', initial);
+    return initial;
+  });
+
+  function toggleTheme() {
+    setTheme((t) => {
+      const next = t === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try {
+        localStorage.setItem('pcrobots-theme', next);
+      } catch {
+        // localStorage unavailable — theme change still applies for this session
+      }
+      return next;
+    });
+  }
 
   async function refreshData(preferredMatchId?: string): Promise<void> {
     setLoading(true);
@@ -407,416 +447,488 @@ export function App() {
   }
 
   return (
-    <main className="app-shell">
-      <div className="background-grid" />
-      <div className="app-frame">
-        <header className="hero">
-          <div>
-            <p className="eyebrow">Faithful mechanics, modern platform</p>
-            <h1>PCRobots Operations Deck</h1>
-            <p className="hero-copy">
-              Build bots, forge arenas, launch exhibition matches, track ladder standings, and schedule tournament rounds from one control surface.
-            </p>
+    <div className="shell">
+      {/* ── Desktop Sidebar ── */}
+      <nav className="sidebar">
+        <div className="sidebar-logo">
+          <div className="logo-lockup">
+            <div className="logo-icon">⚡</div>
+            <div>
+              <div className="logo-text">PCRobots</div>
+              <div className="logo-sub">Ops Deck</div>
+            </div>
           </div>
-          <div className="hero-stats stat-grid-wide">
-            <div className="stat-card"><span className="stat-value">{bots.length}</span><span className="stat-label">bots</span></div>
-            <div className="stat-card"><span className="stat-value">{arenas.length}</span><span className="stat-label">arenas</span></div>
-            <div className="stat-card"><span className="stat-value">{matches.length}</span><span className="stat-label">matches</span></div>
-            <div className="stat-card"><span className="stat-value">{ladders.length}</span><span className="stat-label">ladders</span></div>
-            <div className="stat-card"><span className="stat-value">{tournaments.length}</span><span className="stat-label">tournaments</span></div>
-          </div>
-        </header>
-
-        <div className="status-row">
-          <button className="ghost-button" type="button" onClick={() => void refreshData()} disabled={loading || submitting}>
-            {loading ? "Refreshing..." : "Refresh data"}
+        </div>
+        <div className="nav-section">
+          <div className="nav-section-label">Workspace</div>
+          <button className={`nav-item${activeTab === 'bots' ? ' active' : ''}`} onClick={() => setActiveTab('bots')}>
+            <span className="nav-icon">🤖</span> Bots
+            <span className="nav-badge">{bots.length}</span>
           </button>
-          {message ? <span className="message success">{message}</span> : null}
-          {error ? <span className="message error">{error}</span> : null}
+          <button className={`nav-item${activeTab === 'arenas' ? ' active' : ''}`} onClick={() => setActiveTab('arenas')}>
+            <span className="nav-icon">🗺</span> Arenas
+            <span className="nav-badge">{arenas.length}</span>
+          </button>
+          <button className={`nav-item${activeTab === 'matches' ? ' active' : ''}`} onClick={() => setActiveTab('matches')}>
+            <span className="nav-icon">▶</span> Matches
+            <span className="nav-badge">{matches.length}</span>
+          </button>
+          <button className={`nav-item${activeTab === 'compete' ? ' active' : ''}`} onClick={() => setActiveTab('compete')}>
+            <span className="nav-icon">⚔</span> Compete
+            <span className="nav-badge">{ladders.length + tournaments.length}</span>
+          </button>
+        </div>
+        <div className="sidebar-footer">
+          <div className="avatar">P</div>
+          <div className="user-info">
+            <div className="user-name">PCRobots</div>
+            <div className="user-role">Ops Deck</div>
+          </div>
+          <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+        </div>
+      </nav>
+
+      {/* ── Content Wrap ── */}
+      <div className="content-wrap">
+        {/* Mobile top bar */}
+        <div className="topbar">
+          <div className="topbar-logo">
+            <div className="logo-icon">⚡</div>
+            <div className="logo-text">PCRobots</div>
+          </div>
+          <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
         </div>
 
-        <section className="dashboard-grid expanded-grid">
-          <div className="stack-column">
-            <section className="panel editor-panel" data-testid="bot-panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Bot Lab</p>
-                  <h2>Create Bot</h2>
-                </div>
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => setBotForm((current) => ({ ...current, source: defaultBotTemplates[current.language] }))}
-                >
-                  Load template
-                </button>
-              </div>
-
-              <div className="form-grid two-up">
-                <label>
-                  <span>Name</span>
-                  <input value={botForm.name} onChange={(event) => setBotForm((current) => ({ ...current, name: event.target.value }))} />
-                </label>
-                <label>
-                  <span>Language</span>
-                  <select
-                    value={botForm.language}
-                    onChange={(event) => {
-                      const language = event.target.value as SupportedLanguage;
-                      setBotForm((current) => ({ ...current, language, source: defaultBotTemplates[language] }));
-                    }}
-                  >
-                    <option value="javascript">JavaScript</option>
-                    <option value="typescript">TypeScript</option>
-                    <option value="python">Python</option>
-                  </select>
-                </label>
-              </div>
-
-              <label>
-                <span>Description</span>
-                <input value={botForm.description} onChange={(event) => setBotForm((current) => ({ ...current, description: event.target.value }))} />
-              </label>
-
-              <CodeEditor language={botForm.language} value={botForm.source} height={300} onChange={(value) => setBotForm((current) => ({ ...current, source: value }))} />
-
-              <button className="primary-button" type="button" onClick={() => void handleCreateBot()} disabled={submitting}>
-                Save bot revision
+        {/* Main content */}
+        <main className="content">
+          <div className="content-inner">
+            <div className="status-row">
+              <button className="ghost-button" type="button" onClick={() => void refreshData()} disabled={loading || submitting}>
+                {loading ? 'Refreshing...' : 'Refresh data'}
               </button>
-            </section>
+              {message ? <span className="message success">{message}</span> : null}
+              {error ? <span className="message error">{error}</span> : null}
+            </div>
 
-            <section className="panel editor-panel" data-testid="arena-panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Arena Forge</p>
-                  <h2>Create Arena</h2>
+            {activeTab === 'bots' && (
+              <div>
+                <div className="page-header">
+                  <div>
+                    <div className="page-title">Bots</div>
+                    <div className="page-sub">Build and manage your robot fleet</div>
+                  </div>
                 </div>
-                <button className="ghost-button" type="button" onClick={() => setArenaForm(createInitialArenaState())}>
-                  Reset sample
-                </button>
-              </div>
-
-              <div className="form-grid two-up">
-                <label>
-                  <span>Name</span>
-                  <input value={arenaForm.name} onChange={(event) => setArenaForm((current) => ({ ...current, name: event.target.value }))} />
-                </label>
-                <label>
-                  <span>Description</span>
-                  <input value={arenaForm.description} onChange={(event) => setArenaForm((current) => ({ ...current, description: event.target.value }))} />
-                </label>
-              </div>
-
-              <CodeEditor language="arena" value={arenaForm.text} height={280} onChange={(value) => setArenaForm((current) => ({ ...current, text: value }))} />
-
-              <button className="primary-button" type="button" onClick={() => void handleCreateArena()} disabled={submitting}>
-                Save arena
-              </button>
-            </section>
-          </div>
-
-          <div className="stack-column wide-column">
-            <section className="panel match-panel" data-testid="match-panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Operations</p>
-                  <h2>Launch Match</h2>
-                </div>
-                <span className="status-pill subtle">API-backed</span>
-              </div>
-
-              <div className="form-grid three-up">
-                <label>
-                  <span>Name</span>
-                  <input value={matchForm.name} onChange={(event) => setMatchForm((current) => ({ ...current, name: event.target.value }))} />
-                </label>
-                <label>
-                  <span>Mode</span>
-                  <select
-                    value={matchForm.mode}
-                    onChange={(event) => setMatchForm((current) => ({ ...current, mode: event.target.value as MatchMode, enqueue: event.target.value === "queued" }))}
-                  >
-                    <option value="live">Live</option>
-                    <option value="queued">Queued</option>
-                    <option value="ladder">Ladder</option>
-                    <option value="round-robin">Round-robin</option>
-                    <option value="single-elimination">Single elimination</option>
-                    <option value="double-elimination">Double elimination</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Arena</span>
-                  <select value={matchForm.arenaId} onChange={(event) => setMatchForm((current) => ({ ...current, arenaId: event.target.value }))}>
-                    <option value="">Select arena</option>
-                    {arenas.map((arena) => <option key={arena.id} value={arena.id}>{arena.name}</option>)}
-                  </select>
-                </label>
-              </div>
-
-              <div className="form-grid two-up">
-                <label>
-                  <span>Team A bot</span>
-                  <select value={matchForm.teamABotId} onChange={(event) => setMatchForm((current) => ({ ...current, teamABotId: event.target.value }))}>
-                    <option value="">Select bot</option>
-                    {bots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name} ({bot.latestRevision.language})</option>)}
-                  </select>
-                </label>
-                <label>
-                  <span>Team B bot</span>
-                  <select value={matchForm.teamBBotId} onChange={(event) => setMatchForm((current) => ({ ...current, teamBBotId: event.target.value }))}>
-                    <option value="">Select bot</option>
-                    {bots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name} ({bot.latestRevision.language})</option>)}
-                  </select>
-                </label>
-              </div>
-
-              <div className="form-grid three-up compact-row">
-                <label>
-                  <span>Seed</span>
-                  <input type="number" value={matchForm.seed} onChange={(event) => setMatchForm((current) => ({ ...current, seed: Number(event.target.value) }))} />
-                </label>
-                <label>
-                  <span>Max ticks</span>
-                  <input type="number" value={matchForm.maxTicks} onChange={(event) => setMatchForm((current) => ({ ...current, maxTicks: Number(event.target.value) }))} />
-                </label>
-                <label className="checkbox-row">
-                  <span>Queue execution</span>
-                  <input type="checkbox" checked={matchForm.enqueue} onChange={(event) => setMatchForm((current) => ({ ...current, enqueue: event.target.checked }))} />
-                </label>
-              </div>
-
-              <button className="primary-button" type="button" onClick={() => void handleCreateMatch()} disabled={submitting}>
-                {matchForm.enqueue || matchForm.mode === "queued" ? "Store and enqueue" : "Store and run now"}
-              </button>
-            </section>
-
-            <ReplayViewer match={selectedMatch} />
-
-            <section className="panel list-panel" data-testid="stored-matches-panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Runs</p>
-                  <h2>Stored Matches</h2>
-                </div>
-              </div>
-              <div className="scroll-list compact-list">
-                {matches.length > 0 ? matches.map((match) => (
-                  <button key={match.id} className={`match-list-card${selectedMatchId === match.id ? " active" : ""}`} type="button" onClick={() => setSelectedMatchId(match.id)}>
-                    <span className="match-title">{match.name}</span>
-                    <span className="match-meta">{match.participants.map((participant) => participant.botName).join(" vs ")}</span>
-                    <span className="match-meta">{match.status} · {match.mode}</span>
-                  </button>
-                )) : <p className="muted">No matches stored yet.</p>}
-              </div>
-            </section>
-          </div>
-
-          <div className="stack-column side-column">
-            <section className="panel competition-panel" data-testid="ladder-panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Ranked Play</p>
-                  <h2>Create Ladder</h2>
-                </div>
-              </div>
-              <div className="form-grid two-up">
-                <label>
-                  <span>Name</span>
-                  <input value={ladderForm.name} onChange={(event) => setLadderForm((current) => ({ ...current, name: event.target.value }))} />
-                </label>
-                <label>
-                  <span>Arena</span>
-                  <select value={ladderForm.arenaId} onChange={(event) => setLadderForm((current) => ({ ...current, arenaId: event.target.value }))}>
-                    <option value="">Select arena</option>
-                    {arenas.map((arena) => <option key={arena.id} value={arena.id}>{arena.name}</option>)}
-                  </select>
-                </label>
-              </div>
-              <label>
-                <span>Description</span>
-                <input value={ladderForm.description} onChange={(event) => setLadderForm((current) => ({ ...current, description: event.target.value }))} />
-              </label>
-              <label>
-                <span>Max ticks</span>
-                <input type="number" value={ladderForm.maxTicks} onChange={(event) => setLadderForm((current) => ({ ...current, maxTicks: Number(event.target.value) }))} />
-              </label>
-              <BotChecklist bots={bots} selectedBotIds={ladderForm.entryBotIds} onToggle={(botId) => setLadderForm((current) => ({ ...current, entryBotIds: toggleSelection(current.entryBotIds, botId) }))} />
-              <button className="primary-button" type="button" onClick={() => void handleCreateLadder()} disabled={submitting}>
-                Create ladder
-              </button>
-              <div className="scroll-list competition-list">
-                {ladders.length > 0 ? ladders.map((ladder) => (
-                  <article key={ladder.id} className="list-card ladder-card">
-                    <div className="card-toolbar">
-                      <div>
-                        <h3>{ladder.name}</h3>
-                        <p>{ladder.description || "No description"}</p>
+                <StatRow chips={[
+                  { label: 'Bots', value: bots.length },
+                  { label: 'Arenas', value: arenas.length },
+                  { label: 'Matches', value: matches.length },
+                ]} />
+                <div className="two-col">
+                  <div>
+                    {/* Bot creation panel */}
+                    <section className="panel" data-testid="bot-panel">
+                      <div className="panel-header">
+                        <div>
+                          <p className="eyebrow">Bot Lab</p>
+                          <h2>Create Bot</h2>
+                        </div>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          onClick={() => setBotForm((current) => ({ ...current, source: defaultBotTemplates[current.language] }))}
+                        >
+                          Load template
+                        </button>
                       </div>
-                      <button className="ghost-button small-button" type="button" onClick={() => void handleLadderChallenge(ladder.id)} disabled={submitting || ladder.entries.length < 2}>
-                        Challenge top pair
+                      <div className="form-grid two-up">
+                        <label>
+                          <span>Name</span>
+                          <input value={botForm.name} onChange={(event) => setBotForm((current) => ({ ...current, name: event.target.value }))} />
+                        </label>
+                        <label>
+                          <span>Language</span>
+                          <select
+                            value={botForm.language}
+                            onChange={(event) => {
+                              const language = event.target.value as SupportedLanguage;
+                              setBotForm((current) => ({ ...current, language, source: defaultBotTemplates[language] }));
+                            }}
+                          >
+                            <option value="javascript">JavaScript</option>
+                            <option value="typescript">TypeScript</option>
+                            <option value="python">Python</option>
+                          </select>
+                        </label>
+                      </div>
+                      <label>
+                        <span>Description</span>
+                        <input value={botForm.description} onChange={(event) => setBotForm((current) => ({ ...current, description: event.target.value }))} />
+                      </label>
+                      <CodeEditor language={botForm.language} value={botForm.source} height={300} onChange={(value) => setBotForm((current) => ({ ...current, source: value }))} />
+                      <button className="primary-button" type="button" onClick={() => void handleCreateBot()} disabled={submitting}>
+                        Save bot revision
                       </button>
-                    </div>
-                    <p className="match-meta">{ladder.arenaName} · {ladder.entries.length} entries</p>
-                    <ol className="standing-list">
-                      {ladder.standings.slice(0, 4).map((standing) => (
-                        <li key={standing.ladderEntryId}>
-                          <span>{standing.botName}</span>
-                          <span>{standing.rating}</span>
-                          <small>{standing.wins}-{standing.losses}-{standing.draws}</small>
-                        </li>
-                      ))}
-                    </ol>
-                  </article>
-                )) : <p className="muted">No ladders yet.</p>}
-              </div>
-            </section>
-
-            <section className="panel competition-panel" data-testid="tournament-panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Events</p>
-                  <h2>Create Tournament</h2>
+                    </section>
+                  </div>
+                  <div>
+                    {/* Bot catalog */}
+                    <section className="panel list-panel" data-testid="bot-catalog-panel">
+                      <div className="panel-header">
+                        <div>
+                          <p className="eyebrow">Registry</p>
+                          <h2>Bot Catalog</h2>
+                        </div>
+                      </div>
+                      <div className="scroll-list compact-list">
+                        {bots.length > 0 ? bots.map((bot) => (
+                          <article key={bot.id} className="list-card">
+                            <h3>{bot.name}</h3>
+                            <p>{bot.description || 'No description'}</p>
+                            <span>{bot.latestRevision.language}</span>
+                          </article>
+                        )) : <p className="muted">No bots stored yet.</p>}
+                      </div>
+                    </section>
+                  </div>
                 </div>
               </div>
-              <div className="form-grid three-up">
-                <label>
-                  <span>Name</span>
-                  <input value={tournamentForm.name} onChange={(event) => setTournamentForm((current) => ({ ...current, name: event.target.value }))} />
-                </label>
-                <label>
-                  <span>Format</span>
-                  <select value={tournamentForm.format} onChange={(event) => setTournamentForm((current) => ({ ...current, format: event.target.value as TournamentFormat }))}>
-                    <option value="round-robin">Round-robin</option>
-                    <option value="single-elimination">Single elimination</option>
-                    <option value="double-elimination">Double elimination</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Arena</span>
-                  <select value={tournamentForm.arenaId} onChange={(event) => setTournamentForm((current) => ({ ...current, arenaId: event.target.value }))}>
-                    <option value="">Select arena</option>
-                    {arenas.map((arena) => <option key={arena.id} value={arena.id}>{arena.name}</option>)}
-                  </select>
-                </label>
-              </div>
-              <label>
-                <span>Description</span>
-                <input value={tournamentForm.description} onChange={(event) => setTournamentForm((current) => ({ ...current, description: event.target.value }))} />
-              </label>
-              <div className="form-grid two-up">
-                <label>
-                  <span>Max ticks</span>
-                  <input type="number" value={tournamentForm.maxTicks} onChange={(event) => setTournamentForm((current) => ({ ...current, maxTicks: Number(event.target.value) }))} />
-                </label>
-                <label>
-                  <span>Seed base</span>
-                  <input type="number" value={tournamentForm.seedBase} onChange={(event) => setTournamentForm((current) => ({ ...current, seedBase: Number(event.target.value) }))} />
-                </label>
-              </div>
-              <BotChecklist bots={bots} selectedBotIds={tournamentForm.entryBotIds} onToggle={(botId) => setTournamentForm((current) => ({ ...current, entryBotIds: toggleSelection(current.entryBotIds, botId) }))} />
-              <button className="primary-button" type="button" onClick={() => void handleCreateTournament()} disabled={submitting}>
-                Create tournament
-              </button>
-              <div className="scroll-list competition-list">
-                {tournaments.length > 0 ? tournaments.map((tournament) => (
-                  <article key={tournament.id} className="list-card tournament-card">
-                    <div className="card-toolbar">
-                      <div>
-                        <h3>{tournament.name}</h3>
-                        <p>{tournament.description || "No description"}</p>
-                      </div>
-                      <div className="button-cluster">
-                        <button
-                          className="ghost-button small-button"
-                          type="button"
-                          onClick={() => void handleRunTournament(tournament.id, { enqueue: false, limit: 1 })}
-                          disabled={submitting || tournament.summary.pendingMatches === 0}
-                        >
-                          Run next
-                        </button>
-                        <button
-                          className="ghost-button small-button"
-                          type="button"
-                          onClick={() => void handleRunTournament(tournament.id, { enqueue: false })}
-                          disabled={submitting || tournament.summary.pendingMatches === 0}
-                        >
-                          Run all now
-                        </button>
-                        <button
-                          className="ghost-button small-button"
-                          type="button"
-                          onClick={() => void handleRunTournament(tournament.id, { enqueue: true })}
-                          disabled={submitting || tournament.summary.pendingMatches === 0}
-                        >
-                          Enqueue pending
-                        </button>
-                      </div>
+            )}
+
+            {activeTab === 'arenas' && (
+              <div>
+                <div className="page-header">
+                  <div>
+                    <div className="page-title">Arenas</div>
+                    <div className="page-sub">Forge and manage battle arenas</div>
+                  </div>
+                </div>
+                <StatRow chips={[
+                  { label: 'Arenas', value: arenas.length },
+                  { label: 'Bots', value: bots.length },
+                  { label: 'Matches', value: matches.length },
+                ]} />
+                <section className="panel" data-testid="arena-panel">
+                  <div className="panel-header">
+                    <div>
+                      <p className="eyebrow">Arena Forge</p>
+                      <h2>Create Arena</h2>
                     </div>
-                    <p className="match-meta">{tournament.format} · {tournament.entries.length} entrants · {tournament.arenaName}</p>
-                    <div className="summary-grid">
-                      <div className="summary-chip">
-                        <strong>{tournament.summary.completedMatches}/{tournament.summary.totalMatches}</strong>
-                        <small>completed</small>
-                      </div>
-                      <div className="summary-chip">
-                        <strong>{tournament.summary.pendingMatches}</strong>
-                        <small>pending</small>
-                      </div>
-                      <div className="summary-chip">
-                        <strong>{tournament.summary.queuedMatches + tournament.summary.runningMatches}</strong>
-                        <small>active</small>
-                      </div>
-                      <div className="summary-chip">
-                        <strong>{tournament.summary.failedMatches}</strong>
-                        <small>failed</small>
-                      </div>
+                    <button className="ghost-button" type="button" onClick={() => setArenaForm(createInitialArenaState())}>
+                      Reset sample
+                    </button>
+                  </div>
+                  <div className="form-grid two-up">
+                    <label>
+                      <span>Name</span>
+                      <input value={arenaForm.name} onChange={(event) => setArenaForm((current) => ({ ...current, name: event.target.value }))} />
+                    </label>
+                    <label>
+                      <span>Description</span>
+                      <input value={arenaForm.description} onChange={(event) => setArenaForm((current) => ({ ...current, description: event.target.value }))} />
+                    </label>
+                  </div>
+                  <CodeEditor language="arena" value={arenaForm.text} height={280} onChange={(value) => setArenaForm((current) => ({ ...current, text: value }))} />
+                  <button className="primary-button" type="button" onClick={() => void handleCreateArena()} disabled={submitting}>
+                    Save arena
+                  </button>
+                </section>
+              </div>
+            )}
+
+            {activeTab === 'matches' && (
+              <div>
+                <div className="page-header">
+                  <div>
+                    <div className="page-title">Matches</div>
+                    <div className="page-sub">Launch, replay, and review matches</div>
+                  </div>
+                </div>
+                <StatRow chips={[
+                  { label: 'Total', value: matches.length },
+                  { label: 'Completed', value: matches.filter((m) => m.status === 'completed').length },
+                  { label: 'Active', value: matches.filter((m) => m.status === 'running' || m.status === 'queued').length },
+                ]} />
+                <section className="panel" data-testid="match-panel">
+                  <div className="panel-header">
+                    <div>
+                      <p className="eyebrow">Operations</p>
+                      <h2>Launch Match</h2>
                     </div>
-                    <p className="leader-line">{getTournamentStatusLine(tournament)}</p>
-                    <ol className="standing-list compact-standing-list">
-                      {tournament.standings.slice(0, 4).map((standing) => (
-                        <li key={standing.tournamentEntryId}>
-                          <span>#{standing.seed} {standing.botName}</span>
-                          <span>{tournament.format === "round-robin" ? String(standing.points) + " pts" : standing.eliminated ? "out" : "alive"}</span>
-                          <small>{standing.wins}-{standing.losses}-{standing.draws}</small>
-                        </li>
-                      ))}
-                    </ol>
-                    <div className="round-summary-list">
-                      {tournament.rounds.slice(0, 6).map((round) => {
-                        const counts = getRoundStateCounts(tournament, round.id);
-                        return (
-                          <div key={round.id} className="round-summary-item">
-                            <span>{round.label}</span>
-                            <small>{counts.completed}/{counts.total} complete · {counts.pending} pending</small>
+                    <span className="status-pill subtle">API-backed</span>
+                  </div>
+                  <div className="form-grid three-up">
+                    <label>
+                      <span>Name</span>
+                      <input value={matchForm.name} onChange={(event) => setMatchForm((current) => ({ ...current, name: event.target.value }))} />
+                    </label>
+                    <label>
+                      <span>Mode</span>
+                      <select
+                        value={matchForm.mode}
+                        onChange={(event) => setMatchForm((current) => ({ ...current, mode: event.target.value as MatchMode, enqueue: event.target.value === 'queued' }))}
+                      >
+                        <option value="live">Live</option>
+                        <option value="queued">Queued</option>
+                        <option value="ladder">Ladder</option>
+                        <option value="round-robin">Round-robin</option>
+                        <option value="single-elimination">Single elimination</option>
+                        <option value="double-elimination">Double elimination</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Arena</span>
+                      <select value={matchForm.arenaId} onChange={(event) => setMatchForm((current) => ({ ...current, arenaId: event.target.value }))}>
+                        <option value="">Select arena</option>
+                        {arenas.map((arena) => <option key={arena.id} value={arena.id}>{arena.name}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="form-grid two-up">
+                    <label>
+                      <span>Team A bot</span>
+                      <select value={matchForm.teamABotId} onChange={(event) => setMatchForm((current) => ({ ...current, teamABotId: event.target.value }))}>
+                        <option value="">Select bot</option>
+                        {bots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name} ({bot.latestRevision.language})</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Team B bot</span>
+                      <select value={matchForm.teamBBotId} onChange={(event) => setMatchForm((current) => ({ ...current, teamBBotId: event.target.value }))}>
+                        <option value="">Select bot</option>
+                        {bots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name} ({bot.latestRevision.language})</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="form-grid three-up">
+                    <label>
+                      <span>Seed</span>
+                      <input type="number" value={matchForm.seed} onChange={(event) => setMatchForm((current) => ({ ...current, seed: Number(event.target.value) }))} />
+                    </label>
+                    <label>
+                      <span>Max ticks</span>
+                      <input type="number" value={matchForm.maxTicks} onChange={(event) => setMatchForm((current) => ({ ...current, maxTicks: Number(event.target.value) }))} />
+                    </label>
+                    <label className="checkbox-row">
+                      <span>Queue execution</span>
+                      <input type="checkbox" checked={matchForm.enqueue} onChange={(event) => setMatchForm((current) => ({ ...current, enqueue: event.target.checked }))} />
+                    </label>
+                  </div>
+                  <button className="primary-button" type="button" onClick={() => void handleCreateMatch()} disabled={submitting}>
+                    {matchForm.enqueue || matchForm.mode === 'queued' ? 'Store and enqueue' : 'Store and run now'}
+                  </button>
+                </section>
+                <ReplayViewer match={selectedMatch} />
+                <section className="panel list-panel" data-testid="stored-matches-panel">
+                  <div className="panel-header">
+                    <div>
+                      <p className="eyebrow">Runs</p>
+                      <h2>Stored Matches</h2>
+                    </div>
+                  </div>
+                  <div className="scroll-list compact-list">
+                    {matches.length > 0 ? matches.map((match) => (
+                      <button key={match.id} className={`match-list-card${selectedMatchId === match.id ? ' active' : ''}`} type="button" onClick={() => setSelectedMatchId(match.id)}>
+                        <span className="match-title">{match.name}</span>
+                        <span className="match-meta">{match.participants.map((p) => p.botName).join(' vs ')}</span>
+                        <span className="match-meta">{match.status} · {match.mode}</span>
+                      </button>
+                    )) : <p className="muted">No matches stored yet.</p>}
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {activeTab === 'compete' && (
+              <div>
+                <div className="page-header">
+                  <div>
+                    <div className="page-title">Compete</div>
+                    <div className="page-sub">Ladders, tournaments, and standings</div>
+                  </div>
+                </div>
+                <StatRow chips={[
+                  { label: 'Ladders', value: ladders.length },
+                  { label: 'Tournaments', value: tournaments.length },
+                  { label: 'Bots', value: bots.length },
+                ]} />
+                <section className="panel" data-testid="ladder-panel">
+                  <div className="panel-header">
+                    <div>
+                      <p className="eyebrow">Ranked Play</p>
+                      <h2>Create Ladder</h2>
+                    </div>
+                  </div>
+                  <div className="form-grid two-up">
+                    <label>
+                      <span>Name</span>
+                      <input value={ladderForm.name} onChange={(event) => setLadderForm((current) => ({ ...current, name: event.target.value }))} />
+                    </label>
+                    <label>
+                      <span>Arena</span>
+                      <select value={ladderForm.arenaId} onChange={(event) => setLadderForm((current) => ({ ...current, arenaId: event.target.value }))}>
+                        <option value="">Select arena</option>
+                        {arenas.map((arena) => <option key={arena.id} value={arena.id}>{arena.name}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <label>
+                    <span>Description</span>
+                    <input value={ladderForm.description} onChange={(event) => setLadderForm((current) => ({ ...current, description: event.target.value }))} />
+                  </label>
+                  <label>
+                    <span>Max ticks</span>
+                    <input type="number" value={ladderForm.maxTicks} onChange={(event) => setLadderForm((current) => ({ ...current, maxTicks: Number(event.target.value) }))} />
+                  </label>
+                  <BotChecklist bots={bots} selectedBotIds={ladderForm.entryBotIds} onToggle={(botId) => setLadderForm((current) => ({ ...current, entryBotIds: toggleSelection(current.entryBotIds, botId) }))} />
+                  <button className="primary-button" type="button" onClick={() => void handleCreateLadder()} disabled={submitting}>
+                    Create ladder
+                  </button>
+                  <div className="scroll-list competition-list">
+                    {ladders.length > 0 ? ladders.map((ladder) => (
+                      <article key={ladder.id} className="list-card">
+                        <div className="card-toolbar">
+                          <div>
+                            <h3>{ladder.name}</h3>
+                            <p>{ladder.description || 'No description'}</p>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </article>
-                )) : <p className="muted">No tournaments yet.</p>}
-              </div>
-            </section>
+                          <button className="ghost-button small-button" type="button" onClick={() => void handleLadderChallenge(ladder.id)} disabled={submitting || ladder.entries.length < 2}>
+                            Challenge top pair
+                          </button>
+                        </div>
+                        <p className="match-meta">{ladder.arenaName} · {ladder.entries.length} entries</p>
+                        <ol className="standing-list">
+                          {ladder.standings.slice(0, 4).map((standing) => (
+                            <li key={standing.ladderEntryId}>
+                              <span>{standing.botName}</span>
+                              <span>{standing.rating}</span>
+                              <small>{standing.wins}-{standing.losses}-{standing.draws}</small>
+                            </li>
+                          ))}
+                        </ol>
+                      </article>
+                    )) : <p className="muted">No ladders yet.</p>}
+                  </div>
+                </section>
 
-            <section className="panel list-panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Registry</p>
-                  <h2>Bot Catalog</h2>
-                </div>
+                <section className="panel" data-testid="tournament-panel">
+                  <div className="panel-header">
+                    <div>
+                      <p className="eyebrow">Events</p>
+                      <h2>Create Tournament</h2>
+                    </div>
+                  </div>
+                  <div className="form-grid three-up">
+                    <label>
+                      <span>Name</span>
+                      <input value={tournamentForm.name} onChange={(event) => setTournamentForm((current) => ({ ...current, name: event.target.value }))} />
+                    </label>
+                    <label>
+                      <span>Format</span>
+                      <select value={tournamentForm.format} onChange={(event) => setTournamentForm((current) => ({ ...current, format: event.target.value as TournamentFormat }))}>
+                        <option value="round-robin">Round-robin</option>
+                        <option value="single-elimination">Single elimination</option>
+                        <option value="double-elimination">Double elimination</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Arena</span>
+                      <select value={tournamentForm.arenaId} onChange={(event) => setTournamentForm((current) => ({ ...current, arenaId: event.target.value }))}>
+                        <option value="">Select arena</option>
+                        {arenas.map((arena) => <option key={arena.id} value={arena.id}>{arena.name}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <label>
+                    <span>Description</span>
+                    <input value={tournamentForm.description} onChange={(event) => setTournamentForm((current) => ({ ...current, description: event.target.value }))} />
+                  </label>
+                  <div className="form-grid two-up">
+                    <label>
+                      <span>Max ticks</span>
+                      <input type="number" value={tournamentForm.maxTicks} onChange={(event) => setTournamentForm((current) => ({ ...current, maxTicks: Number(event.target.value) }))} />
+                    </label>
+                    <label>
+                      <span>Seed base</span>
+                      <input type="number" value={tournamentForm.seedBase} onChange={(event) => setTournamentForm((current) => ({ ...current, seedBase: Number(event.target.value) }))} />
+                    </label>
+                  </div>
+                  <BotChecklist bots={bots} selectedBotIds={tournamentForm.entryBotIds} onToggle={(botId) => setTournamentForm((current) => ({ ...current, entryBotIds: toggleSelection(current.entryBotIds, botId) }))} />
+                  <button className="primary-button" type="button" onClick={() => void handleCreateTournament()} disabled={submitting}>
+                    Create tournament
+                  </button>
+                  <div className="scroll-list competition-list">
+                    {tournaments.length > 0 ? tournaments.map((tournament) => (
+                      <article key={tournament.id} className="list-card">
+                        <div className="card-toolbar">
+                          <div>
+                            <h3>{tournament.name}</h3>
+                            <p>{tournament.description || 'No description'}</p>
+                          </div>
+                          <div className="button-cluster">
+                            <button className="ghost-button small-button" type="button" onClick={() => void handleRunTournament(tournament.id, { enqueue: false, limit: 1 })} disabled={submitting || tournament.summary.pendingMatches === 0}>Run next</button>
+                            <button className="ghost-button small-button" type="button" onClick={() => void handleRunTournament(tournament.id, { enqueue: false })} disabled={submitting || tournament.summary.pendingMatches === 0}>Run all now</button>
+                            <button className="ghost-button small-button" type="button" onClick={() => void handleRunTournament(tournament.id, { enqueue: true })} disabled={submitting || tournament.summary.pendingMatches === 0}>Enqueue pending</button>
+                          </div>
+                        </div>
+                        <p className="match-meta">{tournament.format} · {tournament.entries.length} entrants · {tournament.arenaName}</p>
+                        <div className="summary-grid">
+                          <div className="summary-chip"><strong>{tournament.summary.completedMatches}/{tournament.summary.totalMatches}</strong><small>completed</small></div>
+                          <div className="summary-chip"><strong>{tournament.summary.pendingMatches}</strong><small>pending</small></div>
+                          <div className="summary-chip"><strong>{tournament.summary.queuedMatches + tournament.summary.runningMatches}</strong><small>active</small></div>
+                          <div className="summary-chip"><strong>{tournament.summary.failedMatches}</strong><small>failed</small></div>
+                        </div>
+                        <p className="leader-line">{getTournamentStatusLine(tournament)}</p>
+                        <ol className="standing-list compact-standing-list">
+                          {tournament.standings.slice(0, 4).map((standing) => (
+                            <li key={standing.tournamentEntryId}>
+                              <span>#{standing.seed} {standing.botName}</span>
+                              <span>{tournament.format === 'round-robin' ? String(standing.points) + ' pts' : standing.eliminated ? 'out' : 'alive'}</span>
+                              <small>{standing.wins}-{standing.losses}-{standing.draws}</small>
+                            </li>
+                          ))}
+                        </ol>
+                        <div className="round-summary-list">
+                          {tournament.rounds.slice(0, 6).map((round) => {
+                            const counts = getRoundStateCounts(tournament, round.id);
+                            return (
+                              <div key={round.id} className="round-summary-item">
+                                <span>{round.label}</span>
+                                <small>{counts.completed}/{counts.total} complete · {counts.pending} pending</small>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </article>
+                    )) : <p className="muted">No tournaments yet.</p>}
+                  </div>
+                </section>
               </div>
-              <div className="scroll-list compact-list">
-                {bots.length > 0 ? bots.map((bot) => (
-                  <article key={bot.id} className="list-card compact-card">
-                    <h3>{bot.name}</h3>
-                    <p>{bot.description || "No description"}</p>
-                    <span>{bot.latestRevision.language}</span>
-                  </article>
-                )) : <p className="muted">No bots stored yet.</p>}
-              </div>
-            </section>
+            )}
           </div>
-        </section>
+        </main>
+
+        {/* Mobile bottom nav */}
+        <nav className="bottom-nav">
+          <div className="bottom-nav-inner">
+            <button className={`bottom-nav-item${activeTab === 'bots' ? ' active' : ''}`} onClick={() => setActiveTab('bots')}>
+              <span className="nav-icon">🤖</span>Bots
+            </button>
+            <button className={`bottom-nav-item${activeTab === 'arenas' ? ' active' : ''}`} onClick={() => setActiveTab('arenas')}>
+              <span className="nav-icon">🗺</span>Arenas
+            </button>
+            <button className={`bottom-nav-item${activeTab === 'matches' ? ' active' : ''}`} onClick={() => setActiveTab('matches')}>
+              <span className="nav-icon">▶</span>Matches
+            </button>
+            <button className={`bottom-nav-item${activeTab === 'compete' ? ' active' : ''}`} onClick={() => setActiveTab('compete')}>
+              <span className="nav-icon">⚔</span>Compete
+            </button>
+          </div>
+        </nav>
       </div>
-    </main>
+    </div>
   );
 }
