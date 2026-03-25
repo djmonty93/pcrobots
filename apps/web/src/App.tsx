@@ -184,6 +184,8 @@ function getTournamentStatusLine(tournament: TournamentRecord): string {
   return "No leader yet";
 }
 
+type Tab = 'bots' | 'arenas' | 'matches' | 'compete';
+
 function StatRow(props: { chips: Array<{ label: string; value: number | string }> }) {
   return (
     <div className="stat-row">
@@ -214,19 +216,21 @@ export function App() {
   const [ladderForm, setLadderForm] = useState(createInitialLadderState);
   const [tournamentForm, setTournamentForm] = useState(createInitialTournamentState);
 
-  type Tab = 'bots' | 'arenas' | 'matches' | 'compete';
   const [activeTab, setActiveTab] = useState<Tab>('bots');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    return (localStorage.getItem('pcrobots-theme') as 'dark' | 'light') ?? 'dark';
+    const stored = localStorage.getItem('pcrobots-theme') as 'dark' | 'light' | null;
+    const initial = stored ?? 'dark';
+    document.documentElement.setAttribute('data-theme', initial);
+    return initial;
   });
 
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('pcrobots-theme', theme);
-  }, [theme]);
-
   function toggleTheme() {
-    setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+    setTheme((t) => {
+      const next = t === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('pcrobots-theme', next);
+      return next;
+    });
   }
 
   async function refreshData(preferredMatchId?: string): Promise<void> {
