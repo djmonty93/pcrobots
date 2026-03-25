@@ -218,8 +218,12 @@ export function App() {
 
   const [activeTab, setActiveTab] = useState<Tab>('bots');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    const stored = localStorage.getItem('pcrobots-theme') as 'dark' | 'light' | null;
-    const initial = stored ?? 'dark';
+    let initial: 'dark' | 'light' = 'dark';
+    try {
+      initial = (localStorage.getItem('pcrobots-theme') as 'dark' | 'light' | null) ?? 'dark';
+    } catch {
+      // localStorage unavailable (sandboxed iframe, strict privacy settings)
+    }
     document.documentElement.setAttribute('data-theme', initial);
     return initial;
   });
@@ -228,7 +232,11 @@ export function App() {
     setTheme((t) => {
       const next = t === 'dark' ? 'light' : 'dark';
       document.documentElement.setAttribute('data-theme', next);
-      localStorage.setItem('pcrobots-theme', next);
+      try {
+        localStorage.setItem('pcrobots-theme', next);
+      } catch {
+        // localStorage unavailable — theme change still applies for this session
+      }
       return next;
     });
   }
