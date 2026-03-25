@@ -24,9 +24,29 @@ test("buildSandboxDockerArgs applies strict container isolation flags", () => {
   assert.ok(args.includes("/tmp:rw,noexec,nosuid,size=64m"));
   assert.ok(args.includes("--user"));
   assert.ok(args.includes("node"));
+  assert.ok(args.includes("--env"));
+  assert.ok(args.includes("PCROBOTS_PYTHON_BIN=python"));
   assert.equal(args.at(-3), "pcrobots-worker:latest");
   assert.equal(args.at(-2), "node");
   assert.equal(args.at(-1), "/app/packages/platform/dist/platform/src/sandbox-runner.js");
+});
+
+test("buildSandboxDockerArgs does not grant network, writable rootfs, or extra capabilities", () => {
+  const args = buildSandboxDockerArgs({
+    image: "pcrobots-worker:latest",
+    cpuLimit: "1.0",
+    memoryLimit: "512m",
+    pidsLimit: "32",
+    timeoutMs: 5000
+  });
+
+  assert.equal(args.includes("--privileged"), false);
+  assert.equal(args.includes("--cap-add"), false);
+  assert.equal(args.includes("--volume"), false);
+  assert.equal(args.includes("--mount"), false);
+  assert.ok(args.includes("--network"));
+  assert.ok(args.includes("none"));
+  assert.ok(args.includes("--read-only"));
 });
 
 test("parseSandboxResult throws if stdout is not valid JSON", () => {

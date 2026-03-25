@@ -4,31 +4,48 @@ function uniqueName(prefix: string): string {
   return `${prefix} ${Date.now()} ${Math.floor(Math.random() * 1000)}`;
 }
 
-test("browser smoke covers bot, arena, and live match flows", async ({ page }) => {
+function uniqueEmail(prefix: string): string {
+  return `${prefix.toLowerCase().replace(/\s+/g, ".")}.${Date.now()}@pcrobots.local`;
+}
+
+const adminEmail = process.env.PCROBOTS_ADMIN_EMAIL ?? "admin@pcrobots.local";
+const adminPassword = process.env.PCROBOTS_ADMIN_PASSWORD ?? "change-me-admin-password";
+
+test("browser smoke covers registration, resource authoring, and live match flows", async ({ page }) => {
+  const accountEmail = uniqueEmail("browser-user");
+  const accountPassword = `BrowserPass${Date.now()}99`;
   const alphaName = uniqueName("Browser Alpha");
   const betaName = uniqueName("Browser Beta");
   const arenaName = uniqueName("Browser Arena");
   const liveMatchName = uniqueName("Browser Live");
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "PCRobots Operations Deck" })).toBeVisible();
-  await expect(page.getByText("Failed to fetch")).toHaveCount(0);
+  const loginPanel = page.getByTestId("login-panel");
+  await expect(loginPanel.getByRole("heading", { name: "Sign In" })).toBeVisible();
+
+  await loginPanel.getByLabel("Email").fill(accountEmail);
+  await loginPanel.getByLabel("Password").fill(accountPassword);
+  await loginPanel.getByRole("button", { name: "Create user account" }).click();
+  await expect(page.getByText(`Created and signed into ${accountEmail}`)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "User workspace" })).toBeVisible();
 
   const botSection = page.getByTestId("bot-panel");
   await botSection.getByLabel("Name").fill(alphaName);
-  await botSection.getByRole("button", { name: "Save bot revision" }).click();
+  await botSection.getByRole("button", { name: /save/i }).click();
   await expect(page.getByText(`Saved ${alphaName}`)).toBeVisible();
 
   await botSection.getByLabel("Name").fill(betaName);
   await botSection.getByLabel("Language").selectOption("python");
-  await botSection.getByRole("button", { name: "Save bot revision" }).click();
+  await botSection.getByRole("button", { name: /save/i }).click();
   await expect(page.getByText(`Saved ${betaName}`)).toBeVisible();
 
+  await page.getByRole("button", { name: /arenas/i }).click();
   const arenaSection = page.getByTestId("arena-panel");
   await arenaSection.getByLabel("Name").fill(arenaName);
   await arenaSection.getByRole("button", { name: "Save arena" }).click();
   await expect(page.getByText(`Saved arena ${arenaName}`)).toBeVisible();
 
+  await page.getByRole("button", { name: /matches/i }).click();
   const matchSection = page.getByTestId("match-panel");
   await matchSection.getByLabel("Name").fill(liveMatchName);
   await matchSection.getByLabel("Arena").selectOption({ label: arenaName });
@@ -43,5 +60,41 @@ test("browser smoke covers bot, arena, and live match flows", async ({ page }) =
   const liveMatchButton = storedMatches.getByRole("button", { name: new RegExp(liveMatchName) });
   await expect(liveMatchButton).toBeVisible();
   await expect(liveMatchButton).toContainText(/completed|failed/);
-  await expect(page.getByRole("heading", { name: "Replay Viewer" })).toBeVisible();
+  await expect(page.locator(".replay-panel")).toBeVisible();
+  await expect(page.getByRole("heading", { name: liveMatchName })).toBeVisible();
+});
+
+test("browser smoke covers admin account management and ownership transfer", async ({ page }) => {
+  const transferableEmail = uniqueEmail("browser-transfer");
+  const recipientEmail = uniqueEmail("browser-recipient");
+  const userPassword = `BrowserPass${Date.now()}88`;
+
+  await page.goto("/");
+  const loginPanel = page.getByTestId("login-panel");
+  await loginPanel.getByLabel("Email").fill(adminEmail);
+  await loginPanel.getByLabel("Password").fill(adminPassword);
+  await loginPanel.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Admin workspace" })).toBeVisible();
+
+  await page.getByRole("button", { name: /accounts/i }).click();
+  await expect(page.locator(".page-title").filter({ hasText: "Accounts" })).toBeVisible();
+
+  const adminUsersPanel = page.getByTestId("admin-users-panel");
+  await adminUsersPanel.getByLabel("Email").fill(transferableEmail);
+  await adminUsersPanel.getByLabel(/Password/).fill(userPassword);
+  await adminUsersPanel.getByLabel("Role").selectOption("user");
+  await adminUsersPanel.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByText(`Created ${transferableEmail}`)).toBeVisible();
+
+  await adminUsersPanel.getByLabel("Email").fill(recipientEmail);
+  await adminUsersPanel.getByLabel(/Password/).fill(userPassword);
+  await adminUsersPanel.getByLabel("Role").selectOption("user");
+  await adminUsersPanel.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByText(`Created ${recipientEmail}`)).toBeVisible();
+
+  const transferableCard = adminUsersPanel.locator(".list-card").filter({ hasText: transferableEmail }).first();
+  await transferableCard.getByRole("button", { name: "Edit" }).click();
+  await adminUsersPanel.getByLabel("Transfer owned resources to").selectOption({ label: recipientEmail });
+  await adminUsersPanel.getByRole("button", { name: "Transfer ownership" }).click();
+  await expect(page.getByText(/Transferred .* bots, .* arenas, .* ladders, .* tournaments, and .* matches/)).toBeVisible();
 });

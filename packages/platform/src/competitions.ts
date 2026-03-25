@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 
-import { type Database, type MatchMode, type MatchParticipantRecord, type MatchRecord, type TeamId } from "./db.js";
+import { type AccessScope, type Database, type MatchMode, type MatchParticipantRecord, type MatchRecord, type TeamId } from "./db.js";
 
 export type TournamentFormat = "round-robin" | "single-elimination" | "double-elimination";
 export type TournamentBracket = "round-robin" | "winners" | "losers" | "finals";
@@ -30,6 +30,8 @@ export interface LadderStandingRecord {
 
 export interface LadderRecord {
   id: string;
+  ownerUserId: string | null;
+  ownerEmail: string | null;
   name: string;
   description: string;
   arenaRevisionId: string;
@@ -92,6 +94,8 @@ export interface TournamentRoundRecord {
 
 export interface TournamentRecord {
   id: string;
+  ownerUserId: string | null;
+  ownerEmail: string | null;
   name: string;
   description: string;
   format: TournamentFormat;
@@ -109,6 +113,7 @@ export interface TournamentRecord {
 }
 
 export interface CreateLadderInput {
+  ownerUserId: string;
   name: string;
   description?: string;
   arenaId?: string;
@@ -118,6 +123,7 @@ export interface CreateLadderInput {
 }
 
 export interface CreateTournamentInput {
+  ownerUserId: string;
   name: string;
   description?: string;
   format: TournamentFormat;
@@ -145,6 +151,8 @@ type TimestampValue = Date | string;
 
 type LadderRow = {
   id: string;
+  owner_user_id: string | null;
+  owner_email: string | null;
   name: string;
   description: string;
   arena_revision_id: string;
@@ -184,6 +192,8 @@ type LadderMatchParticipantRow = {
 
 type TournamentRow = {
   id: string;
+  owner_user_id: string | null;
+  owner_email: string | null;
   name: string;
   description: string;
   format: TournamentFormat;
@@ -376,6 +386,7 @@ async function resolveLatestBotRevisionId(client: PoolClient, botId: string): Pr
 async function insertMatchRecord(
   client: PoolClient,
   input: {
+    ownerUserId: string;
     name: string;
     mode: MatchMode;
     arenaRevisionId: string;
@@ -394,6 +405,7 @@ async function insertMatchRecord(
     `
       INSERT INTO matches (
         id,
+        owner_user_id,
         name,
         mode,
         status,
@@ -405,10 +417,11 @@ async function insertMatchRecord(
         tournament_id,
         tournament_round_id
       )
-      VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10)
+      VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9, $10, $11)
     `,
     [
       matchId,
+      input.ownerUserId,
       input.name,
       input.mode,
       input.arenaRevisionId,
@@ -589,11 +602,19 @@ async function computeLadderStandingsByIds(
   return standingsByLadder;
 }
 
-export async function listLadders(database: Database): Promise<LadderRecord[]> {
+export async function listLadders(database: Database, scope?: AccessScope): Promise<LadderRecord[]> {
+  const params: unknown[] = [];
+  const whereClause = scope && scope.role !== "admin" ? "WHERE l.owner_user_id = $1" : "";
+  if (scope && scope.role !== "admin") {
+    params.push(scope.userId);
+  }
+
   const ladderResult = await database.pool.query<LadderRow>(
     `
       SELECT
         l.id,
+        l.owner_user_id,
+        u.email AS owner_email,
         l.name,
         l.description,
         l.arena_revision_id,
@@ -603,10 +624,13 @@ export async function listLadders(database: Database): Promise<LadderRecord[]> {
         l.created_at,
         l.updated_at
       FROM ladders AS l
+      LEFT JOIN users AS u ON u.id = l.owner_user_id
       JOIN arena_revisions AS ar ON ar.id = l.arena_revision_id
       JOIN arenas AS a ON a.id = ar.arena_id
+      ${whereClause}
       ORDER BY l.created_at DESC
-    `
+    `,
+    params
   );
 
   const ladderIds = ladderResult.rows.map((row) => row.id);
@@ -615,6 +639,8 @@ export async function listLadders(database: Database): Promise<LadderRecord[]> {
 
   return ladderResult.rows.map((row) => ({
     id: row.id,
+    ownerUserId: row.owner_user_id,
+    ownerEmail: row.owner_email,
     name: row.name,
     description: row.description,
     arenaRevisionId: row.arena_revision_id,
@@ -628,8 +654,8 @@ export async function listLadders(database: Database): Promise<LadderRecord[]> {
   }));
 }
 
-export async function getLadder(database: Database, ladderId: string): Promise<LadderRecord | null> {
-  const ladders = await listLadders(database);
+export async function getLadder(database: Database, ladderId: string, scope?: AccessScope): Promise<LadderRecord | null> {
+  const ladders = await listLadders(database, scope);
   return ladders.find((ladder) => ladder.id === ladderId) ?? null;
 }
 
@@ -640,10 +666,10 @@ export async function createLadder(database: Database, input: CreateLadderInput)
 
     await client.query(
       `
-        INSERT INTO ladders (id, name, description, arena_revision_id, max_ticks)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO ladders (id, owner_user_id, name, description, arena_revision_id, max_ticks)
+        VALUES ($1, $2, $3, $4, $5, $6)
       `,
-      [createdLadderId, input.name, input.description ?? "", arenaRevisionId, input.maxTicks]
+      [createdLadderId, input.ownerUserId, input.name, input.description ?? "", arenaRevisionId, input.maxTicks]
     );
 
     for (const botId of input.entryBotIds) {
@@ -673,6 +699,10 @@ export async function createLadderChallenge(database: Database, input: CreateLad
   if (!ladder) {
     throw new Error(`Ladder ${input.ladderId} was not found`);
   }
+  if (!ladder.ownerUserId) {
+    throw new Error(`Ladder ${input.ladderId} does not have an owner`);
+  }
+  const ladderOwnerUserId = ladder.ownerUserId;
 
   const entriesById = new Map(ladder.entries.map((entry) => [entry.id, entry]));
   const [entryA, entryB] = input.entryAId && input.entryBId
@@ -685,6 +715,7 @@ export async function createLadderChallenge(database: Database, input: CreateLad
 
   const matchId = await withTransaction(database, async (client) =>
     insertMatchRecord(client, {
+      ownerUserId: ladderOwnerUserId,
       name: `${ladder.name}: ${entryA.botName} vs ${entryB.botName}`,
       mode: "ladder",
       arenaRevisionId: ladder.arenaRevisionId,
@@ -1149,11 +1180,19 @@ export function computeTournamentMetrics(
   };
 }
 
-export async function listTournaments(database: Database): Promise<TournamentRecord[]> {
+export async function listTournaments(database: Database, scope?: AccessScope): Promise<TournamentRecord[]> {
+  const params: unknown[] = [];
+  const whereClause = scope && scope.role !== "admin" ? "WHERE t.owner_user_id = $1" : "";
+  if (scope && scope.role !== "admin") {
+    params.push(scope.userId);
+  }
+
   const tournamentResult = await database.pool.query<TournamentRow>(
     `
       SELECT
         t.id,
+        t.owner_user_id,
+        u.email AS owner_email,
         t.name,
         t.description,
         t.format,
@@ -1165,10 +1204,13 @@ export async function listTournaments(database: Database): Promise<TournamentRec
         t.created_at,
         t.updated_at
       FROM tournaments AS t
+      LEFT JOIN users AS u ON u.id = t.owner_user_id
       JOIN arena_revisions AS ar ON ar.id = t.arena_revision_id
       JOIN arenas AS a ON a.id = ar.arena_id
+      ${whereClause}
       ORDER BY t.created_at DESC
-    `
+    `,
+    params
   );
 
   const tournamentIds = tournamentResult.rows.map((row) => row.id);
@@ -1182,6 +1224,8 @@ export async function listTournaments(database: Database): Promise<TournamentRec
 
     return {
       id: row.id,
+      ownerUserId: row.owner_user_id,
+      ownerEmail: row.owner_email,
       name: row.name,
       description: row.description,
       format: row.format,
@@ -1200,8 +1244,8 @@ export async function listTournaments(database: Database): Promise<TournamentRec
   });
 }
 
-export async function getTournament(database: Database, tournamentId: string): Promise<TournamentRecord | null> {
-  const tournaments = await listTournaments(database);
+export async function getTournament(database: Database, tournamentId: string, scope?: AccessScope): Promise<TournamentRecord | null> {
+  const tournaments = await listTournaments(database, scope);
   return tournaments.find((tournament) => tournament.id === tournamentId) ?? null;
 }
 
@@ -1216,10 +1260,10 @@ export async function createTournament(database: Database, input: CreateTourname
 
     await client.query(
       `
-        INSERT INTO tournaments (id, name, description, format, arena_revision_id, max_ticks, seed_base)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO tournaments (id, owner_user_id, name, description, format, arena_revision_id, max_ticks, seed_base)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `,
-      [createdTournamentId, input.name, input.description ?? "", input.format, arenaRevisionId, input.maxTicks, input.seedBase]
+      [createdTournamentId, input.ownerUserId, input.name, input.description ?? "", input.format, arenaRevisionId, input.maxTicks, input.seedBase]
     );
 
     const entries: TournamentEntryRecord[] = [];
@@ -1278,6 +1322,7 @@ export async function createTournament(database: Database, input: CreateTourname
 
         scheduledMatchIndex += 1;
         await insertMatchRecord(client, {
+          ownerUserId: input.ownerUserId,
           name: `${input.name}: ${round.label} Match ${pairingIndex + 1}`,
           mode: input.format,
           arenaRevisionId,
@@ -1360,6 +1405,7 @@ export async function listPendingTournamentMatches(
 type TournamentProgressMatchRow = {
   id: string;
   tournament_id: string;
+  tournament_owner_user_id: string;
   tournament_name: string;
   tournament_format: TournamentFormat;
   tournament_seed_base: number;
@@ -1496,6 +1542,7 @@ async function getRoundMatchBySlot(
 async function insertTournamentRoundMatch(
   client: PoolClient,
   input: {
+    ownerUserId: string;
     tournamentId: string;
     tournamentName: string;
     mode: MatchMode;
@@ -1510,6 +1557,7 @@ async function insertTournamentRoundMatch(
 ): Promise<string | null> {
   try {
     return await insertMatchRecord(client, {
+      ownerUserId: input.ownerUserId,
       name: `${input.tournamentName}: ${input.round.label}${input.suffix ? ` ${input.suffix}` : ""} Match ${input.roundSlot + 1}`,
       mode: input.mode,
       arenaRevisionId: input.arenaRevisionId,
@@ -1570,6 +1618,7 @@ async function advanceWinnerBracketMatch(
   const rightWinner = currentMatch.round_slot % 2 === 0 ? siblingWinner : winner;
 
   const createdMatchId = await insertTournamentRoundMatch(client, {
+    ownerUserId: currentMatch.tournament_owner_user_id,
     tournamentId: currentMatch.tournament_id,
     tournamentName: currentMatch.tournament_name,
     mode: currentMatch.tournament_format,
@@ -1624,6 +1673,7 @@ async function advanceDoubleEliminationWinnersLoser(
     const rightLoser = currentMatch.round_slot % 2 === 0 ? siblingLoser : loser;
 
     const createdMatchId = await insertTournamentRoundMatch(client, {
+      ownerUserId: currentMatch.tournament_owner_user_id,
       tournamentId: currentMatch.tournament_id,
       tournamentName: currentMatch.tournament_name,
       mode: currentMatch.tournament_format,
@@ -1668,6 +1718,7 @@ async function advanceDoubleEliminationWinnersLoser(
   }
 
   const createdMatchId = await insertTournamentRoundMatch(client, {
+    ownerUserId: currentMatch.tournament_owner_user_id,
     tournamentId: currentMatch.tournament_id,
     tournamentName: currentMatch.tournament_name,
     mode: currentMatch.tournament_format,
@@ -1723,6 +1774,7 @@ async function advanceDoubleEliminationLosersWinner(
     }
 
     const createdMatchId = await insertTournamentRoundMatch(client, {
+      ownerUserId: currentMatch.tournament_owner_user_id,
       tournamentId: currentMatch.tournament_id,
       tournamentName: currentMatch.tournament_name,
       mode: currentMatch.tournament_format,
@@ -1768,6 +1820,7 @@ async function advanceDoubleEliminationLosersWinner(
     }
 
     const createdMatchId = await insertTournamentRoundMatch(client, {
+      ownerUserId: currentMatch.tournament_owner_user_id,
       tournamentId: currentMatch.tournament_id,
       tournamentName: currentMatch.tournament_name,
       mode: currentMatch.tournament_format,
@@ -1811,6 +1864,7 @@ async function advanceDoubleEliminationLosersWinner(
   const rightWinner = currentMatch.round_slot % 2 === 0 ? siblingWinner : winner;
 
   const createdMatchId = await insertTournamentRoundMatch(client, {
+    ownerUserId: currentMatch.tournament_owner_user_id,
     tournamentId: currentMatch.tournament_id,
     tournamentName: currentMatch.tournament_name,
     mode: currentMatch.tournament_format,
@@ -1884,6 +1938,7 @@ async function advanceDoubleEliminationFinal(
   }
 
   const createdMatchId = await insertTournamentRoundMatch(client, {
+    ownerUserId: currentMatch.tournament_owner_user_id,
     tournamentId: currentMatch.tournament_id,
     tournamentName: currentMatch.tournament_name,
     mode: currentMatch.tournament_format,
@@ -1914,6 +1969,7 @@ export async function processTournamentMatchCompletionWithClient(client: PoolCli
       SELECT
         m.id,
         m.tournament_id,
+        t.owner_user_id AS tournament_owner_user_id,
         t.name AS tournament_name,
         t.format AS tournament_format,
         t.seed_base AS tournament_seed_base,
@@ -1935,6 +1991,9 @@ export async function processTournamentMatchCompletionWithClient(client: PoolCli
 
   const currentMatch = matchResult.rows[0];
   if (!currentMatch || currentMatch.status !== "completed") {
+    return [];
+  }
+  if (!currentMatch.tournament_owner_user_id) {
     return [];
   }
 
