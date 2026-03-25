@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test src/competitions.test.ts src/runner.test.ts src/sandbox.test.ts"
+    "test": "node --import tsx --test src/competitions.test.ts src/runner.test.ts src/sandbox.test.ts src/execution.test.ts"
   },
   "dependencies": {
     "@pcrobots/bot-sdk": "0.1.0",
