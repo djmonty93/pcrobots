@@ -15,9 +15,12 @@
     "test": "npm run test --workspace @pcrobots/platform",
     "local:smoke": "node scripts/local_smoke.mjs",
     "compose:up": "docker compose up -d --build",
-    "compose:down": "docker compose down"
+    "compose:down": "docker compose down",
+    "browser:smoke": "npm run build && playwright test tests/e2e/app.spec.ts",
+    "browser:install": "playwright install chromium"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/node": "^25.5.0",
     "@types/pg": "^8.20.0",
     "tsx": "^4.20.5",

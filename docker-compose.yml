@@ -5,6 +5,7 @@ services:
       dockerfile: docker/web/Dockerfile
     environment:
       PORT: 3000
+      PCROBOTS_API_PROXY_URL: http://api:3001
       VITE_API_BASE_URL: http://localhost:3001
     ports:
       - "3000:3000"
@@ -27,8 +28,16 @@ services:
       DATABASE_URL: postgres://pcrobots:pcrobots@postgres:5432/pcrobots
       REDIS_URL: redis://redis:6379
       PCROBOTS_RUNNERS_DIR: /app/runners
+      PCROBOTS_EXECUTION_MODE: container
+      PCROBOTS_RUNNER_IMAGE: ${COMPOSE_PROJECT_NAME:-pcrobots}-worker:latest
+      PCROBOTS_SANDBOX_CPU_LIMIT: "0.50"
+      PCROBOTS_SANDBOX_MEMORY_LIMIT: 256m
+      PCROBOTS_SANDBOX_PIDS_LIMIT: "64"
+      PCROBOTS_SANDBOX_TIMEOUT_MS: "30000"
     ports:
       - "3001:3001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,6 +58,14 @@ services:
       DATABASE_URL: postgres://pcrobots:pcrobots@postgres:5432/pcrobots
       REDIS_URL: redis://redis:6379
       PCROBOTS_RUNNERS_DIR: /app/runners
+      PCROBOTS_EXECUTION_MODE: container
+      PCROBOTS_RUNNER_IMAGE: ${COMPOSE_PROJECT_NAME:-pcrobots}-worker:latest
+      PCROBOTS_SANDBOX_CPU_LIMIT: "0.50"
+      PCROBOTS_SANDBOX_MEMORY_LIMIT: 256m
+      PCROBOTS_SANDBOX_PIDS_LIMIT: "64"
+      PCROBOTS_SANDBOX_TIMEOUT_MS: "30000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy

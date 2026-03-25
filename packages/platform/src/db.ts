@@ -67,6 +67,10 @@ export interface MatchRecord {
   name: string;
   mode: MatchMode;
   status: MatchStatus;
+  ladderId: string | null;
+  tournamentId: string | null;
+  tournamentRoundId: string | null;
+  roundSlot: number | null;
   arenaRevisionId: string;
   arenaId: string;
   arenaName: string;
@@ -140,6 +144,10 @@ type MatchRow = {
   name: string;
   mode: MatchMode;
   status: MatchStatus;
+  ladder_id: string | null;
+  tournament_id: string | null;
+  tournament_round_id: string | null;
+  round_slot: number | null;
   arena_revision_id: string;
   arena_id: string;
   arena_name: string;
@@ -234,6 +242,10 @@ function mapMatchRow(row: MatchRow, participants: MatchParticipantRow[]): MatchR
     name: row.name,
     mode: row.mode,
     status: row.status,
+    ladderId: row.ladder_id,
+    tournamentId: row.tournament_id,
+    tournamentRoundId: row.tournament_round_id,
+    roundSlot: row.round_slot,
     arenaRevisionId: row.arena_revision_id,
     arenaId: row.arena_id,
     arenaName: row.arena_name,
@@ -459,6 +471,10 @@ export class Database {
         m.name,
         m.mode,
         m.status,
+        m.ladder_id,
+        m.tournament_id,
+        m.tournament_round_id,
+        m.round_slot,
         m.arena_revision_id,
         a.id AS arena_id,
         a.name AS arena_name,
@@ -516,6 +532,10 @@ export class Database {
         m.name,
         m.mode,
         m.status,
+        m.ladder_id,
+        m.tournament_id,
+        m.tournament_round_id,
+        m.round_slot,
         m.arena_revision_id,
         a.id AS arena_id,
         a.name AS arena_name,
@@ -664,6 +684,44 @@ export class Database {
 
     return (result.rowCount ?? 0) > 0;
   }
+  async completeRunningMatchRun(
+    matchId: string,
+    payload: { result?: unknown; events?: unknown; errorMessage?: string | null },
+    afterComplete?: (client: PoolClient) => Promise<void>
+  ): Promise<boolean> {
+    return withTransaction(this.pool, async (client) => {
+      const result = await client.query<{ id: string }>(
+        `
+          UPDATE matches
+          SET
+            status = 'completed',
+            result_json = $2,
+            events_json = $3,
+            error_message = $4,
+            updated_at = NOW()
+          WHERE id = $1
+            AND status = 'running'
+          RETURNING id
+        `,
+        [
+          matchId,
+          toJsonParameter(payload.result),
+          toJsonParameter(payload.events),
+          payload.errorMessage ?? null
+        ]
+      );
+
+      if ((result.rowCount ?? 0) === 0) {
+        return false;
+      }
+
+      if (afterComplete) {
+        await afterComplete(client);
+      }
+
+      return true;
+    });
+  }
 
   private async resolveLatestArenaRevisionId(client: PoolClient, arenaId: string | undefined): Promise<string> {
     if (!arenaId) {
@@ -707,3 +765,4 @@ export class Database {
     return row.id;
   }
 }
+

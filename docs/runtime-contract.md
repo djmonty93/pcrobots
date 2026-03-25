@@ -13,11 +13,11 @@ TypeScript is transpiled to JavaScript before execution. Lua remains future work
 
 ## Host Model
 
-The worker owns the authoritative simulation clock. Bots do not run freely; they receive a turn snapshot and must return an action before the timeout.
+The worker owns the authoritative simulation clock. Match execution now happens inside short-lived sandbox runner containers. Bots do not run freely; they receive a turn snapshot and must return an action before the timeout.
 
 ## Runner Shape
 
-Each bot runs inside a language-specific runner image that exposes the same logical contract:
+Each match runs inside a short-lived sandbox container that loads the language runtimes it needs and exposes the same logical contract to bot code:
 
 1. receive match initialization
 2. receive per-turn state snapshots
@@ -73,6 +73,7 @@ Each bot runs inside a language-specific runner image that exposes the same logi
 - bounded CPU time
 - bounded memory
 - bounded process count
-- bounded stdout/stderr
+- bounded stdout/stderr`r`n- read-only container rootfs with tmpfs scratch space only`r`n- dropped Linux capabilities with `no-new-privileges``r`n- isolated per-match container lifecycle
 
 The API that bots see is a modern language-level SDK that maps back to the faithful engine actions.
+

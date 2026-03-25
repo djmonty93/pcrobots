@@ -14,8 +14,8 @@ import {
   createMatchQueue,
   createTournament,
   Database,
-  enqueueMatchRun,
   executeStoredMatch,
+  queueMatchRun,
   getLadder,
   getTournament,
   listLadders,
@@ -29,6 +29,7 @@ import {
   type LadderRecord,
   type MatchRecord,
   type SupportedLanguage,
+  retry,
   type TeamId,
   type TournamentFormat,
   type TournamentRecord
@@ -37,8 +38,12 @@ import {
 const databaseUrl = process.env.DATABASE_URL ?? "postgres://pcrobots:pcrobots@localhost:5432/pcrobots";
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
 const db = new Database(databaseUrl);
-await db.migrate();
 const matchQueue = createMatchQueue(redisUrl);
+
+await retry(async () => {
+  await db.migrate();
+  await matchQueue.waitUntilReady();
+}, { label: "api bootstrap" });
 
 const supportedLanguages = ["javascript", "typescript", "python"] as const;
 const supportedModes = ["live", "queued", "ladder", "round-robin", "single-elimination", "double-elimination"] as const;
@@ -454,38 +459,18 @@ function parseTournamentRunRequest(body: unknown, tournament: TournamentRecord):
 }
 
 async function queueStoredMatch(match: MatchRecord): Promise<{ matchId: string; jobId: string }> {
-  if (match.status === "queued") {
-    return {
-      matchId: match.id,
-      jobId: match.id
-    };
-  }
-
-  if (match.status === "running" || match.status === "completed") {
-    conflict(`Match ${match.id} cannot be queued from status ${match.status}`);
-  }
-
-  const transitioned = await db.transitionMatchStatus(match.id, [match.status], "queued");
-  if (!transitioned) {
-    const current = await db.getMatch(match.id);
-    if (current?.status === "queued") {
-      return {
-        matchId: current.id,
-        jobId: current.id
-      };
-    }
-
-    conflict(`Match ${match.id} cannot be queued from status ${current?.status ?? "missing"}`);
-  }
-
   try {
-    const job = await enqueueMatchRun(matchQueue, match.id);
+    const queued = await queueMatchRun(db, matchQueue, match);
     return {
-      matchId: match.id,
-      jobId: String(job.id)
+      matchId: queued.matchId,
+      jobId: queued.jobId
     };
   } catch (error) {
-    await db.transitionMatchStatus(match.id, ["queued"], match.status);
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("cannot be queued from status")) {
+      conflict(message);
+    }
+
     throw error;
   }
 }
@@ -509,7 +494,7 @@ async function runOrQueueMatch(match: MatchRecord, forceQueue: boolean): Promise
 
   return {
     statusCode: 200,
-    payload: await executeStoredMatch(db, match.id)
+    payload: (await executeStoredMatch(db, match.id)).match
   };
 }
 
@@ -838,4 +823,5 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.exit(0);
   });
 }
+
 

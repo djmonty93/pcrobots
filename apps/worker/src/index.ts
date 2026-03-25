@@ -1,22 +1,55 @@
 import { Worker } from "bullmq";
 
-import { createRedisConnection, Database, executeStoredMatch, matchQueueName } from "@pcrobots/platform";
+import {
+  createMatchQueue,
+  createRedisConnection,
+  Database,
+  executeStoredMatch,
+  matchQueueName,
+  queueMatchRun,
+  retry
+} from "@pcrobots/platform";
 
 const databaseUrl = process.env.DATABASE_URL ?? "postgres://pcrobots:pcrobots@localhost:5432/pcrobots";
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
 
 const db = new Database(databaseUrl);
-await db.migrate();
+const matchQueue = createMatchQueue(redisUrl);
+
+await retry(async () => {
+  await db.migrate();
+  await matchQueue.waitUntilReady();
+}, { label: "worker bootstrap" });
+
+async function queueMatches(matchIds: string[]): Promise<string[]> {
+  const queuedMatchIds: string[] = [];
+
+  for (const matchId of matchIds) {
+    const match = await db.getMatch(matchId);
+    if (!match) {
+      continue;
+    }
+
+    const queued = await queueMatchRun(db, matchQueue, match);
+    if (queued.queued) {
+      queuedMatchIds.push(queued.matchId);
+    }
+  }
+
+  return queuedMatchIds;
+}
 
 const worker = new Worker(
   matchQueueName,
   async (job) => {
     const result = await executeStoredMatch(db, job.data.matchId);
+    const queuedMatchIds = await queueMatches(result.followUpMatchIds);
 
     return {
-      matchId: result.id,
-      status: result.status,
-      updatedAt: result.updatedAt
+      matchId: result.match.id,
+      status: result.match.status,
+      updatedAt: result.match.updatedAt,
+      queuedMatchIds
     };
   },
   {
@@ -24,6 +57,8 @@ const worker = new Worker(
     concurrency: 2
   }
 );
+
+await retry(() => worker.waitUntilReady(), { label: "worker ready" });
 
 worker.on("ready", () => {
   console.log("worker ready", { queue: matchQueueName });
@@ -34,7 +69,8 @@ worker.on("completed", (job, result) => {
     jobId: job.id,
     matchId: result.matchId,
     status: result.status,
-    updatedAt: result.updatedAt
+    updatedAt: result.updatedAt,
+    queuedMatchIds: result.queuedMatchIds
   });
 });
 
@@ -52,7 +88,7 @@ setInterval(() => {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, async () => {
-    await Promise.allSettled([worker.close(), db.close()]);
+    await Promise.allSettled([worker.close(), matchQueue.close(), db.close()]);
     process.exit(0);
   });
 }

@@ -1507,9 +1507,9 @@ async function insertTournamentRoundMatch(
     participants: Array<{ botRevisionId: string; teamId: TeamId }>;
     suffix?: string;
   }
-): Promise<void> {
+): Promise<string | null> {
   try {
-    await insertMatchRecord(client, {
+    return await insertMatchRecord(client, {
       name: `${input.tournamentName}: ${input.round.label}${input.suffix ? ` ${input.suffix}` : ""} Match ${input.roundSlot + 1}`,
       mode: input.mode,
       arenaRevisionId: input.arenaRevisionId,
@@ -1527,7 +1527,7 @@ async function insertTournamentRoundMatch(
       "code" in error &&
       (error as { code?: string }).code === "23505"
     ) {
-      return;
+      return null;
     }
 
     throw error;
@@ -1539,37 +1539,37 @@ async function advanceWinnerBracketMatch(
   currentMatch: TournamentProgressMatchRow,
   winnerRoundCount: number,
   winner: MatchParticipantOutcomeRow
-): Promise<void> {
+): Promise<string[]> {
   if (currentMatch.round_slot === null || currentMatch.round_number >= winnerRoundCount) {
-    return;
+    return [];
   }
 
   const nextRound = await getTournamentRound(client, currentMatch.tournament_id, "winners", currentMatch.round_number + 1);
   if (!nextRound) {
-    return;
+    return [];
   }
 
   const siblingSlot = currentMatch.round_slot % 2 === 0 ? currentMatch.round_slot + 1 : currentMatch.round_slot - 1;
   const sibling = await getRoundMatchBySlot(client, currentMatch.tournament_round_id, siblingSlot);
   if (!sibling || sibling.status !== "completed") {
-    return;
+    return [];
   }
 
   const nextRoundSlot = Math.floor(currentMatch.round_slot / 2);
   const existingNextMatch = await getRoundMatchBySlot(client, nextRound.id, nextRoundSlot);
   if (existingNextMatch) {
-    return;
+    return [];
   }
 
   const siblingWinner = await getCompletedMatchWinner(client, sibling.id);
   if (!siblingWinner) {
-    return;
+    return [];
   }
 
   const leftWinner = currentMatch.round_slot % 2 === 0 ? winner : siblingWinner;
   const rightWinner = currentMatch.round_slot % 2 === 0 ? siblingWinner : winner;
 
-  await insertTournamentRoundMatch(client, {
+  const createdMatchId = await insertTournamentRoundMatch(client, {
     tournamentId: currentMatch.tournament_id,
     tournamentName: currentMatch.tournament_name,
     mode: currentMatch.tournament_format,
@@ -1583,6 +1583,8 @@ async function advanceWinnerBracketMatch(
       { botRevisionId: rightWinner.bot_revision_id, teamId: "B" }
     ]
   });
+
+  return createdMatchId ? [createdMatchId] : [];
 }
 
 async function advanceDoubleEliminationWinnersLoser(
@@ -1590,38 +1592,38 @@ async function advanceDoubleEliminationWinnersLoser(
   currentMatch: TournamentProgressMatchRow,
   loser: MatchParticipantOutcomeRow,
   winnerRoundCount: number
-): Promise<void> {
+): Promise<string[]> {
   if (currentMatch.round_slot === null) {
-    return;
+    return [];
   }
 
   if (currentMatch.round_number === 1) {
     const targetRound = await getTournamentRound(client, currentMatch.tournament_id, "losers", 1);
     if (!targetRound) {
-      return;
+      return [];
     }
 
     const siblingSlot = currentMatch.round_slot % 2 === 0 ? currentMatch.round_slot + 1 : currentMatch.round_slot - 1;
     const sibling = await getRoundMatchBySlot(client, currentMatch.tournament_round_id, siblingSlot);
     if (!sibling || sibling.status !== "completed") {
-      return;
+      return [];
     }
 
     const targetSlot = Math.floor(currentMatch.round_slot / 2);
     const existing = await getRoundMatchBySlot(client, targetRound.id, targetSlot);
     if (existing) {
-      return;
+      return [];
     }
 
     const siblingLoser = await getCompletedMatchLoser(client, sibling.id);
     if (!siblingLoser) {
-      return;
+      return [];
     }
 
     const leftLoser = currentMatch.round_slot % 2 === 0 ? loser : siblingLoser;
     const rightLoser = currentMatch.round_slot % 2 === 0 ? siblingLoser : loser;
 
-    await insertTournamentRoundMatch(client, {
+    const createdMatchId = await insertTournamentRoundMatch(client, {
       tournamentId: currentMatch.tournament_id,
       tournamentName: currentMatch.tournament_name,
       mode: currentMatch.tournament_format,
@@ -1636,36 +1638,36 @@ async function advanceDoubleEliminationWinnersLoser(
       ]
     });
 
-    return;
+    return createdMatchId ? [createdMatchId] : [];
   }
 
   const loserRoundNumber = currentMatch.round_number === winnerRoundCount ? winnerRoundCount * 2 - 2 : currentMatch.round_number * 2 - 2;
   const targetRound = await getTournamentRound(client, currentMatch.tournament_id, "losers", loserRoundNumber);
   if (!targetRound) {
-    return;
+    return [];
   }
 
   const existing = await getRoundMatchBySlot(client, targetRound.id, currentMatch.round_slot);
   if (existing) {
-    return;
+    return [];
   }
 
   const feederRound = await getTournamentRound(client, currentMatch.tournament_id, "losers", loserRoundNumber - 1);
   if (!feederRound) {
-    return;
+    return [];
   }
 
   const feederMatch = await getRoundMatchBySlot(client, feederRound.id, currentMatch.round_slot);
   if (!feederMatch || feederMatch.status !== "completed") {
-    return;
+    return [];
   }
 
   const feederWinner = await getCompletedMatchWinner(client, feederMatch.id);
   if (!feederWinner) {
-    return;
+    return [];
   }
 
-  await insertTournamentRoundMatch(client, {
+  const createdMatchId = await insertTournamentRoundMatch(client, {
     tournamentId: currentMatch.tournament_id,
     tournamentName: currentMatch.tournament_name,
     mode: currentMatch.tournament_format,
@@ -1679,6 +1681,8 @@ async function advanceDoubleEliminationWinnersLoser(
       { botRevisionId: loser.bot_revision_id, teamId: "B" }
     ]
   });
+
+  return createdMatchId ? [createdMatchId] : [];
 }
 
 async function advanceDoubleEliminationLosersWinner(
@@ -1686,39 +1690,39 @@ async function advanceDoubleEliminationLosersWinner(
   currentMatch: TournamentProgressMatchRow,
   winner: MatchParticipantOutcomeRow,
   winnerRoundCount: number
-): Promise<void> {
+): Promise<string[]> {
   if (currentMatch.round_slot === null) {
-    return;
+    return [];
   }
 
   const finalLoserRound = winnerRoundCount * 2 - 2;
   if (currentMatch.round_number === finalLoserRound) {
     const finalsRound = await getTournamentRound(client, currentMatch.tournament_id, "finals", 1);
     if (!finalsRound) {
-      return;
+      return [];
     }
 
     const existing = await getRoundMatchBySlot(client, finalsRound.id, 0);
     if (existing) {
-      return;
+      return [];
     }
 
     const winnersFinalRound = await getTournamentRound(client, currentMatch.tournament_id, "winners", winnerRoundCount);
     if (!winnersFinalRound) {
-      return;
+      return [];
     }
 
     const winnersFinal = await getRoundMatchBySlot(client, winnersFinalRound.id, 0);
     if (!winnersFinal || winnersFinal.status !== "completed") {
-      return;
+      return [];
     }
 
     const winnersChampion = await getCompletedMatchWinner(client, winnersFinal.id);
     if (!winnersChampion) {
-      return;
+      return [];
     }
 
-    await insertTournamentRoundMatch(client, {
+    const createdMatchId = await insertTournamentRoundMatch(client, {
       tournamentId: currentMatch.tournament_id,
       tournamentName: currentMatch.tournament_name,
       mode: currentMatch.tournament_format,
@@ -1733,37 +1737,37 @@ async function advanceDoubleEliminationLosersWinner(
       ]
     });
 
-    return;
+    return createdMatchId ? [createdMatchId] : [];
   }
 
   if (currentMatch.round_number % 2 === 1) {
     const targetRound = await getTournamentRound(client, currentMatch.tournament_id, "losers", currentMatch.round_number + 1);
     if (!targetRound) {
-      return;
+      return [];
     }
 
     const existing = await getRoundMatchBySlot(client, targetRound.id, currentMatch.round_slot);
     if (existing) {
-      return;
+      return [];
     }
 
     const sourceWinnerRoundNumber = Math.floor((currentMatch.round_number + 3) / 2);
     const sourceWinnerRound = await getTournamentRound(client, currentMatch.tournament_id, "winners", sourceWinnerRoundNumber);
     if (!sourceWinnerRound) {
-      return;
+      return [];
     }
 
     const sourceWinnerMatch = await getRoundMatchBySlot(client, sourceWinnerRound.id, currentMatch.round_slot);
     if (!sourceWinnerMatch || sourceWinnerMatch.status !== "completed") {
-      return;
+      return [];
     }
 
     const droppedLoser = await getCompletedMatchLoser(client, sourceWinnerMatch.id);
     if (!droppedLoser) {
-      return;
+      return [];
     }
 
-    await insertTournamentRoundMatch(client, {
+    const createdMatchId = await insertTournamentRoundMatch(client, {
       tournamentId: currentMatch.tournament_id,
       tournamentName: currentMatch.tournament_name,
       mode: currentMatch.tournament_format,
@@ -1778,35 +1782,35 @@ async function advanceDoubleEliminationLosersWinner(
       ]
     });
 
-    return;
+    return createdMatchId ? [createdMatchId] : [];
   }
 
   const targetRound = await getTournamentRound(client, currentMatch.tournament_id, "losers", currentMatch.round_number + 1);
   if (!targetRound) {
-    return;
+    return [];
   }
 
   const targetSlot = Math.floor(currentMatch.round_slot / 2);
   const existing = await getRoundMatchBySlot(client, targetRound.id, targetSlot);
   if (existing) {
-    return;
+    return [];
   }
 
   const siblingSlot = currentMatch.round_slot % 2 === 0 ? currentMatch.round_slot + 1 : currentMatch.round_slot - 1;
   const sibling = await getRoundMatchBySlot(client, currentMatch.tournament_round_id, siblingSlot);
   if (!sibling || sibling.status !== "completed") {
-    return;
+    return [];
   }
 
   const siblingWinner = await getCompletedMatchWinner(client, sibling.id);
   if (!siblingWinner) {
-    return;
+    return [];
   }
 
   const leftWinner = currentMatch.round_slot % 2 === 0 ? winner : siblingWinner;
   const rightWinner = currentMatch.round_slot % 2 === 0 ? siblingWinner : winner;
 
-  await insertTournamentRoundMatch(client, {
+  const createdMatchId = await insertTournamentRoundMatch(client, {
     tournamentId: currentMatch.tournament_id,
     tournamentName: currentMatch.tournament_name,
     mode: currentMatch.tournament_format,
@@ -1820,25 +1824,27 @@ async function advanceDoubleEliminationLosersWinner(
       { botRevisionId: rightWinner.bot_revision_id, teamId: "B" }
     ]
   });
+
+  return createdMatchId ? [createdMatchId] : [];
 }
 
 async function advanceDoubleEliminationFinal(
   client: PoolClient,
   currentMatch: TournamentProgressMatchRow,
   winner: MatchParticipantOutcomeRow
-): Promise<void> {
+): Promise<string[]> {
   if (currentMatch.round_slot !== 0) {
-    return;
+    return [];
   }
 
   const finalsRound = await getTournamentRound(client, currentMatch.tournament_id, "finals", 1);
   if (!finalsRound) {
-    return;
+    return [];
   }
 
   const resetMatch = await getRoundMatchBySlot(client, finalsRound.id, 1);
   if (resetMatch) {
-    return;
+    return [];
   }
 
   const winnersFinalRound = await client.query<{ id: string }>(
@@ -1855,29 +1861,29 @@ async function advanceDoubleEliminationFinal(
 
   const winnersFinalRoundId = winnersFinalRound.rows[0]?.id;
   if (!winnersFinalRoundId) {
-    return;
+    return [];
   }
 
   const winnersFinal = await getRoundMatchBySlot(client, winnersFinalRoundId, 0);
   if (!winnersFinal || winnersFinal.status !== "completed") {
-    return;
+    return [];
   }
 
   const winnersChampion = await getCompletedMatchWinner(client, winnersFinal.id);
   if (!winnersChampion) {
-    return;
+    return [];
   }
 
   if (winner.bot_revision_id === winnersChampion.bot_revision_id) {
-    return;
+    return [];
   }
 
   const currentParticipants = await getCompletedMatchParticipants(client, currentMatch.id);
   if (currentParticipants.length !== 2) {
-    return;
+    return [];
   }
 
-  await insertTournamentRoundMatch(client, {
+  const createdMatchId = await insertTournamentRoundMatch(client, {
     tournamentId: currentMatch.tournament_id,
     tournamentName: currentMatch.tournament_name,
     mode: currentMatch.tournament_format,
@@ -1892,83 +1898,85 @@ async function advanceDoubleEliminationFinal(
     ],
     suffix: "Reset"
   });
+
+  return createdMatchId ? [createdMatchId] : [];
 }
 
-export async function processTournamentMatchCompletion(database: Database, matchId: string): Promise<void> {
-  await withTransaction(database, async (client) => {
-    const matchResult = await client.query<TournamentProgressMatchRow>(
-      `
-        SELECT
-          m.id,
-          m.tournament_id,
-          t.name AS tournament_name,
-          t.format AS tournament_format,
-          t.seed_base AS tournament_seed_base,
-          m.tournament_round_id,
-          m.round_slot,
-          m.status,
-          m.arena_revision_id,
-          m.max_ticks,
-          tr.round_number,
-          tr.label AS round_label,
-          tr.bracket
-        FROM matches AS m
-        JOIN tournaments AS t ON t.id = m.tournament_id
-        JOIN tournament_rounds AS tr ON tr.id = m.tournament_round_id
-        WHERE m.id = $1
-      `,
-      [matchId]
-    );
-
-    const currentMatch = matchResult.rows[0];
-    if (!currentMatch || currentMatch.status !== "completed") {
-      return;
-    }
-
-    const winner = await getCompletedMatchWinner(client, currentMatch.id);
-    if (!winner) {
-      return;
-    }
-
-    if (currentMatch.tournament_format === "single-elimination") {
-      if (currentMatch.bracket !== "winners") {
-        return;
-      }
-
-      const winnerRoundCount = await getWinnerRoundCount(client, currentMatch.tournament_id);
-      await advanceWinnerBracketMatch(client, currentMatch, winnerRoundCount, winner);
-      return;
-    }
-
-    if (currentMatch.tournament_format !== "double-elimination") {
-      return;
-    }
-
-    const winnerRoundCount = await getWinnerRoundCount(client, currentMatch.tournament_id);
-    if (winnerRoundCount === 0) {
-      return;
-    }
-
-    switch (currentMatch.bracket) {
-      case "winners": {
-        await advanceWinnerBracketMatch(client, currentMatch, winnerRoundCount, winner);
-        const loser = await getCompletedMatchLoser(client, currentMatch.id);
-        if (!loser) {
-          return;
-        }
-
-        await advanceDoubleEliminationWinnersLoser(client, currentMatch, loser, winnerRoundCount);
-        return;
-      }
-      case "losers":
-        await advanceDoubleEliminationLosersWinner(client, currentMatch, winner, winnerRoundCount);
-        return;
-      case "finals":
-        await advanceDoubleEliminationFinal(client, currentMatch, winner);
-        return;
-      case "round-robin":
-        return;
-    }
+export async function processTournamentMatchCompletion(database: Database, matchId: string): Promise<string[]> {
+  return withTransaction(database, async (client) => {
+    return processTournamentMatchCompletionWithClient(client, matchId);
   });
 }
 
+export async function processTournamentMatchCompletionWithClient(client: PoolClient, matchId: string): Promise<string[]> {
+  const matchResult = await client.query<TournamentProgressMatchRow>(
+    `
+      SELECT
+        m.id,
+        m.tournament_id,
+        t.name AS tournament_name,
+        t.format AS tournament_format,
+        t.seed_base AS tournament_seed_base,
+        m.tournament_round_id,
+        m.round_slot,
+        m.status,
+        m.arena_revision_id,
+        m.max_ticks,
+        tr.round_number,
+        tr.label AS round_label,
+        tr.bracket
+      FROM matches AS m
+      JOIN tournaments AS t ON t.id = m.tournament_id
+      JOIN tournament_rounds AS tr ON tr.id = m.tournament_round_id
+      WHERE m.id = $1
+    `,
+    [matchId]
+  );
+
+  const currentMatch = matchResult.rows[0];
+  if (!currentMatch || currentMatch.status !== "completed") {
+    return [];
+  }
+
+  const winner = await getCompletedMatchWinner(client, currentMatch.id);
+  if (!winner) {
+    return [];
+  }
+
+  if (currentMatch.tournament_format === "single-elimination") {
+    if (currentMatch.bracket !== "winners") {
+      return [];
+    }
+
+    const winnerRoundCount = await getWinnerRoundCount(client, currentMatch.tournament_id);
+    return advanceWinnerBracketMatch(client, currentMatch, winnerRoundCount, winner);
+  }
+
+  if (currentMatch.tournament_format !== "double-elimination") {
+    return [];
+  }
+
+  const winnerRoundCount = await getWinnerRoundCount(client, currentMatch.tournament_id);
+  if (winnerRoundCount === 0) {
+    return [];
+  }
+
+  switch (currentMatch.bracket) {
+    case "winners": {
+      const createdWinnerMatchIds = await advanceWinnerBracketMatch(client, currentMatch, winnerRoundCount, winner);
+      const loser = await getCompletedMatchLoser(client, currentMatch.id);
+      if (!loser) {
+        return createdWinnerMatchIds;
+      }
+
+      const createdLoserMatchIds = await advanceDoubleEliminationWinnersLoser(client, currentMatch, loser, winnerRoundCount);
+      return [...createdWinnerMatchIds, ...createdLoserMatchIds];
+    }
+    case "losers":
+      return advanceDoubleEliminationLosersWinner(client, currentMatch, winner, winnerRoundCount);
+    case "finals":
+      return advanceDoubleEliminationFinal(client, currentMatch, winner);
+    case "round-robin":
+      return [];
+  }
+}

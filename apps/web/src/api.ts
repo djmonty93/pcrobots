@@ -196,7 +196,7 @@ interface RequestOptions {
   body?: unknown;
 }
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 
 async function requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {

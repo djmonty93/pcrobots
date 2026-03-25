@@ -88,6 +88,19 @@ async function main() {
   });
   log("created bot beta", { id: botBeta.id, name: botBeta.name });
 
+  const botGamma = await requestJson("/api/bots", {
+    method: "POST",
+    body: {
+      name: `Smoke Gamma ${Date.now()}`,
+      description: "compose smoke python bot",
+      language: "python",
+      source: `def on_turn(snapshot):
+    return {"kind": "movement", "targetSpeed": 0, "heading": 180}
+`
+    }
+  });
+  log("created bot gamma", { id: botGamma.id, name: botGamma.name });
+
   const arena = await requestJson("/api/arenas", {
     method: "POST",
     body: {
@@ -97,6 +110,30 @@ async function main() {
     }
   });
   log("created arena", { id: arena.id, name: arena.name });
+
+  const liveMatchResponse = await requestJson("/api/matches", {
+    method: "POST",
+    body: {
+      name: `Smoke Live ${Date.now()}`,
+      mode: "live",
+      arenaId: arena.id,
+      seed: 1337,
+      maxTicks: 40,
+      participants: [
+        { botId: botAlpha.id, teamId: "A" },
+        { botId: botGamma.id, teamId: "B" }
+      ]
+    }
+  });
+  const liveMatch = liveMatchResponse.run;
+  if (liveMatch.status !== "completed") {
+    throw new Error(`Live sandbox match did not complete: ${JSON.stringify(liveMatch)}`);
+  }
+  log("completed live sandbox match", {
+    matchId: liveMatch.id,
+    winnerTeamId: liveMatch.result?.winnerTeamId ?? null,
+    errorMessage: liveMatch.errorMessage ?? null
+  });
 
   const tournament = await requestJson("/api/tournaments", {
     method: "POST",

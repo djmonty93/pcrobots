@@ -437,7 +437,7 @@ export function App() {
 
         <section className="dashboard-grid expanded-grid">
           <div className="stack-column">
-            <section className="panel editor-panel">
+            <section className="panel editor-panel" data-testid="bot-panel">
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Bot Lab</p>
@@ -485,7 +485,7 @@ export function App() {
               </button>
             </section>
 
-            <section className="panel editor-panel">
+            <section className="panel editor-panel" data-testid="arena-panel">
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Arena Forge</p>
@@ -516,7 +516,7 @@ export function App() {
           </div>
 
           <div className="stack-column wide-column">
-            <section className="panel match-panel">
+            <section className="panel match-panel" data-testid="match-panel">
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Operations</p>
@@ -592,7 +592,7 @@ export function App() {
 
             <ReplayViewer match={selectedMatch} />
 
-            <section className="panel list-panel">
+            <section className="panel list-panel" data-testid="stored-matches-panel">
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Runs</p>
@@ -612,7 +612,7 @@ export function App() {
           </div>
 
           <div className="stack-column side-column">
-            <section className="panel competition-panel">
+            <section className="panel competition-panel" data-testid="ladder-panel">
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Ranked Play</p>
@@ -671,7 +671,7 @@ export function App() {
               </div>
             </section>
 
-            <section className="panel competition-panel">
+            <section className="panel competition-panel" data-testid="tournament-panel">
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Events</p>
