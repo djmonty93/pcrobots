@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@pcrobots/engine": [
+        "packages/engine/src/index.ts"
+      ],
+      "@pcrobots/bot-sdk": [
+        "packages/bot-sdk/src/index.ts"
+      ],
+      "@pcrobots/platform": [
+        "packages/platform/src/index.ts"
+      ],
+      "@pcrobots/replay-format": [
+        "packages/replay-format/src/index.ts"
+      ],
+      "@pcrobots/ui": [
+        "packages/ui/src/index.ts"
+      ]
+    }
+  }
+}
