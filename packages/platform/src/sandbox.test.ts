@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildSandboxDockerArgs } from "./sandbox.js";
+import { buildSandboxDockerArgs, parseSandboxResult } from "./sandbox.js";
 
 test("buildSandboxDockerArgs applies strict container isolation flags", () => {
   const args = buildSandboxDockerArgs({
@@ -27,4 +27,36 @@ test("buildSandboxDockerArgs applies strict container isolation flags", () => {
   assert.equal(args.at(-3), "pcrobots-worker:latest");
   assert.equal(args.at(-2), "node");
   assert.equal(args.at(-1), "/app/packages/platform/dist/platform/src/sandbox-runner.js");
+});
+
+test("parseSandboxResult throws if stdout is not valid JSON", () => {
+  assert.throws(
+    () => parseSandboxResult({ error: null, status: 0, stdout: "not-json\n", stderr: "" } as any),
+    (err: Error) => {
+      assert.ok(err.message.includes("not-json"));
+      return true;
+    }
+  );
+});
+
+test("parseSandboxResult throws on non-zero exit with stderr message", () => {
+  assert.throws(
+    () => parseSandboxResult({ error: null, status: 1, stdout: "", stderr: "OOM killed" } as any),
+    /OOM killed/
+  );
+});
+
+test("parseSandboxResult throws when stdout is empty", () => {
+  assert.throws(
+    () => parseSandboxResult({ error: null, status: 0, stdout: "   ", stderr: "" } as any),
+    /no output/i
+  );
+});
+
+test("parseSandboxResult throws the spawn error when result.error is set", () => {
+  const spawnError = new Error("spawn docker ENOENT");
+  assert.throws(
+    () => parseSandboxResult({ error: spawnError, status: null, stdout: "", stderr: "" } as any),
+    /spawn docker ENOENT/
+  );
 });

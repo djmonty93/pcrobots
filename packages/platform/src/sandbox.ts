@@ -76,7 +76,7 @@ function spawnSandbox(config: SandboxDockerConfig, payload: string): SpawnSyncRe
   });
 }
 
-function parseSandboxResult(result: SpawnSyncReturns<string>): SimulatedMatch {
+export function parseSandboxResult(result: SpawnSyncReturns<string>): SimulatedMatch {
   if (result.error) {
     throw result.error;
   }
@@ -89,7 +89,12 @@ function parseSandboxResult(result: SpawnSyncReturns<string>): SimulatedMatch {
     throw new Error("Sandbox produced no output");
   }
 
-  return JSON.parse(result.stdout) as SimulatedMatch;
+  try {
+    return JSON.parse(result.stdout) as SimulatedMatch;
+  } catch {
+    const preview = result.stdout.slice(0, 200).trim();
+    throw new Error(`Sandbox output could not be parsed as JSON: ${preview}`);
+  }
 }
 
 function executeMatchInContainer(match: MatchRecord): SimulatedMatch {
