@@ -215,8 +215,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
 
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  try {
+    for await (const chunk of request) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    throw new HttpError(400, `Failed to read request body: ${message}`);
   }
 
   if (chunks.length === 0) {
@@ -479,7 +484,7 @@ async function queueStoredMatch(match: MatchRecord): Promise<{ matchId: string; 
     if (message.includes("cannot be queued from status")) {
       conflict(message);
     }
-
+    console.error("failed to queue match", { matchId: match.id, error: message });
     throw error;
   }
 }
@@ -822,8 +827,20 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
 });
 
 const port = Number(process.env.PORT ?? 3001);
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  console.error("invalid PORT value", { PORT: process.env.PORT });
+  process.exit(1);
+}
 server.listen(port, () => {
   console.log(`pcrobots api listening on ${port}`);
+});
+
+server.on("error", (error) => {
+  console.error("http server error", {
+    code: (error as NodeJS.ErrnoException).code,
+    message: error.message
+  });
+  process.exit(1);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
