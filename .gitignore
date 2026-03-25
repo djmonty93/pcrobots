@@ -1,3 +1,8 @@
+# Tool artifacts
+.claude/
+.superpowers/
+.codex-pr-body.md
+
 node_modules/
 dist/
 coverage/
