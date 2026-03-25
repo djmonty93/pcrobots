@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 
 import { createMatchState, parseArenaText, type MatchState } from "@pcrobots/engine";
 
-import { type MatchParticipantRecord, type MatchRecord } from "./db.js";
-import { applyEliminationTiebreak } from "./runner.js";
+import { type Database, type MatchParticipantRecord, type MatchRecord } from "./db.js";
+import { applyEliminationTiebreak, executeStoredMatch } from "./runner.js";
 
 function createParticipant(seed: number, teamId: "A" | "B", slot: number): MatchParticipantRecord {
   return {
@@ -100,4 +100,37 @@ test("applyEliminationTiebreak does not modify non-elimination matches", () => {
   assert.equal(applied, false);
   assert.equal(state.result.winnerRobotId, null);
   assert.equal(state.result.winnerTeamId, null);
+});
+
+function makeDb(overrides: Partial<{
+  getMatch: Database["getMatch"];
+  startMatchRun: Database["startMatchRun"];
+  updateRunningMatchRun: Database["updateRunningMatchRun"];
+}>  = {}): Database {
+  return {
+    getMatch: async () => null,
+    startMatchRun: async () => false,
+    updateRunningMatchRun: async () => true,
+    ...overrides
+  } as unknown as Database;
+}
+
+test("executeStoredMatch throws when match is not found", async () => {
+  const db = makeDb({ getMatch: async () => null });
+  await assert.rejects(
+    () => executeStoredMatch(db, "missing-id"),
+    /was not found/
+  );
+});
+
+test("executeStoredMatch throws when match cannot be claimed", async () => {
+  const match = { ...createMatch("single-elimination"), id: "match-1", status: "pending" as const };
+  const db = makeDb({
+    getMatch: async () => match as any,
+    startMatchRun: async () => false
+  });
+  await assert.rejects(
+    () => executeStoredMatch(db, "match-1"),
+    /is not runnable/
+  );
 });
