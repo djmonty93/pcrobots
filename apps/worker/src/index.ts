@@ -30,9 +30,15 @@ async function queueMatches(matchIds: string[]): Promise<string[]> {
       continue;
     }
 
-    const queued = await queueMatchRun(db, matchQueue, match);
-    if (queued.queued) {
-      queuedMatchIds.push(queued.matchId);
+    try {
+      const queued = await queueMatchRun(db, matchQueue, match);
+      if (queued.queued) {
+        queuedMatchIds.push(queued.matchId);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("failed to queue follow-up match", { matchId, error: message });
+      throw error;
     }
   }
 
@@ -82,13 +88,30 @@ worker.on("failed", (job, error) => {
   });
 });
 
+worker.on("error", (error) => {
+  console.error("worker error", { error: error.message });
+});
+
+worker.on("stalled", (jobId) => {
+  console.warn("worker job stalled", { jobId });
+});
+
 setInterval(() => {
   console.log("worker heartbeat", new Date().toISOString());
 }, 30000);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, async () => {
-    await Promise.allSettled([worker.close(), matchQueue.close(), db.close()]);
+    const results = await Promise.allSettled([worker.close(), matchQueue.close(), db.close()]);
+    const services = ["worker", "matchQueue", "db"];
+    for (const [index, result] of results.entries()) {
+      if (result.status === "rejected") {
+        console.error("failed to close service during shutdown", {
+          service: services[index],
+          error: result.reason instanceof Error ? result.reason.message : String(result.reason)
+        });
+      }
+    }
     process.exit(0);
   });
 }
