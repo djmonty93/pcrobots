@@ -20,12 +20,17 @@ function getDockerCommand(): string {
 }
 
 function getSandboxConfig(match: MatchRecord): SandboxDockerConfig {
+  const envTimeout = process.env.PCROBOTS_SANDBOX_TIMEOUT_MS;
+  const parsedTimeout = envTimeout ? Number(envTimeout) : Number.NaN;
+  const computedTimeout = Math.max(5_000, match.maxTicks * 100);
+  const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : computedTimeout;
+
   return {
     image: process.env.PCROBOTS_RUNNER_IMAGE?.trim() || "pcrobots-worker:latest",
     cpuLimit: process.env.PCROBOTS_SANDBOX_CPU_LIMIT?.trim() || "0.50",
     memoryLimit: process.env.PCROBOTS_SANDBOX_MEMORY_LIMIT?.trim() || "256m",
     pidsLimit: process.env.PCROBOTS_SANDBOX_PIDS_LIMIT?.trim() || "64",
-    timeoutMs: Number(process.env.PCROBOTS_SANDBOX_TIMEOUT_MS ?? Math.max(5_000, match.maxTicks * 100))
+    timeoutMs
   };
 }
 

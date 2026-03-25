@@ -297,6 +297,15 @@ function expectTeamId(value: unknown, fieldName: string): TeamId {
   return value as TeamId;
 }
 
+function expectMaxTicks(value: unknown, fallback?: number): number {
+  const ticks = expectInteger(value, "maxTicks", fallback);
+  if (ticks < 1 || ticks > 10_000) {
+    badRequest("maxTicks must be between 1 and 10000");
+  }
+
+  return ticks;
+}
+
 function parseCreateBotInput(body: unknown): CreateBotInput {
   if (!isRecord(body)) {
     badRequest("bot payload must be a JSON object");
@@ -340,7 +349,7 @@ function parseCreateMatchRequest(body: unknown): { input: CreateMatchInput; enqu
       arenaId: typeof body.arenaId === "string" ? body.arenaId.trim() : undefined,
       arenaRevisionId: typeof body.arenaRevisionId === "string" ? body.arenaRevisionId.trim() : undefined,
       seed: expectInteger(body.seed, "seed", 1),
-      maxTicks: expectInteger(body.maxTicks, "maxTicks", 200),
+      maxTicks: expectMaxTicks(body.maxTicks, 200),
       participants: participantsValue.map((participant, index) => {
         if (!isRecord(participant)) {
           badRequest(`participants[${index}] must be a JSON object`);
@@ -377,7 +386,7 @@ function parseCreateLadderInput(body: unknown): CreateLadderInput {
     description: typeof body.description === "string" ? body.description.trim() : "",
     arenaId: typeof body.arenaId === "string" ? body.arenaId.trim() : undefined,
     arenaRevisionId: typeof body.arenaRevisionId === "string" ? body.arenaRevisionId.trim() : undefined,
-    maxTicks: expectInteger(body.maxTicks, "maxTicks", 200),
+    maxTicks: expectMaxTicks(body.maxTicks, 200),
     entryBotIds
   };
 }
@@ -398,7 +407,7 @@ function parseCreateTournamentInput(body: unknown): CreateTournamentInput {
     format: expectTournamentFormat(body.format),
     arenaId: typeof body.arenaId === "string" ? body.arenaId.trim() : undefined,
     arenaRevisionId: typeof body.arenaRevisionId === "string" ? body.arenaRevisionId.trim() : undefined,
-    maxTicks: expectInteger(body.maxTicks, "maxTicks", 200),
+    maxTicks: expectMaxTicks(body.maxTicks, 200),
     seedBase: expectInteger(body.seedBase, "seedBase", 1),
     entryBotIds
   };
