@@ -184,6 +184,19 @@ function getTournamentStatusLine(tournament: TournamentRecord): string {
   return "No leader yet";
 }
 
+function StatRow(props: { chips: Array<{ label: string; value: number | string }> }) {
+  return (
+    <div className="stat-row">
+      {props.chips.map((chip) => (
+        <div key={chip.label} className="stat-chip">
+          <div className="stat-chip-label">{chip.label}</div>
+          <div className="stat-chip-value">{chip.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function App() {
   const [bots, setBots] = useState<BotRecord[]>([]);
   const [arenas, setArenas] = useState<ArenaRecord[]>([]);
@@ -489,58 +502,104 @@ export function App() {
               {error ? <span className="message error">{error}</span> : null}
             </div>
 
-            {/* TEMPORARY: all existing sections — Task 4 will split into tabs */}
-            <section className="dashboard-grid expanded-grid">
-              <div className="stack-column">
-                <section className="panel editor-panel" data-testid="bot-panel">
-                  <div className="panel-header">
-                    <div>
-                      <p className="eyebrow">Bot Lab</p>
-                      <h2>Create Bot</h2>
-                    </div>
-                    <button
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => setBotForm((current) => ({ ...current, source: defaultBotTemplates[current.language] }))}
-                    >
-                      Load template
-                    </button>
+            {activeTab === 'bots' && (
+              <div>
+                <div className="page-header">
+                  <div>
+                    <div className="page-title">Bots</div>
+                    <div className="page-sub">Build and manage your robot fleet</div>
                   </div>
-
-                  <div className="form-grid two-up">
-                    <label>
-                      <span>Name</span>
-                      <input value={botForm.name} onChange={(event) => setBotForm((current) => ({ ...current, name: event.target.value }))} />
-                    </label>
-                    <label>
-                      <span>Language</span>
-                      <select
-                        value={botForm.language}
-                        onChange={(event) => {
-                          const language = event.target.value as SupportedLanguage;
-                          setBotForm((current) => ({ ...current, language, source: defaultBotTemplates[language] }));
-                        }}
-                      >
-                        <option value="javascript">JavaScript</option>
-                        <option value="typescript">TypeScript</option>
-                        <option value="python">Python</option>
-                      </select>
-                    </label>
+                </div>
+                <StatRow chips={[
+                  { label: 'Bots', value: bots.length },
+                  { label: 'Arenas', value: arenas.length },
+                  { label: 'Matches', value: matches.length },
+                ]} />
+                <div className="two-col">
+                  <div>
+                    {/* Bot creation panel */}
+                    <section className="panel" data-testid="bot-panel">
+                      <div className="panel-header">
+                        <div>
+                          <p className="eyebrow">Bot Lab</p>
+                          <h2>Create Bot</h2>
+                        </div>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          onClick={() => setBotForm((current) => ({ ...current, source: defaultBotTemplates[current.language] }))}
+                        >
+                          Load template
+                        </button>
+                      </div>
+                      <div className="form-grid two-up">
+                        <label>
+                          <span>Name</span>
+                          <input value={botForm.name} onChange={(event) => setBotForm((current) => ({ ...current, name: event.target.value }))} />
+                        </label>
+                        <label>
+                          <span>Language</span>
+                          <select
+                            value={botForm.language}
+                            onChange={(event) => {
+                              const language = event.target.value as SupportedLanguage;
+                              setBotForm((current) => ({ ...current, language, source: defaultBotTemplates[language] }));
+                            }}
+                          >
+                            <option value="javascript">JavaScript</option>
+                            <option value="typescript">TypeScript</option>
+                            <option value="python">Python</option>
+                          </select>
+                        </label>
+                      </div>
+                      <label>
+                        <span>Description</span>
+                        <input value={botForm.description} onChange={(event) => setBotForm((current) => ({ ...current, description: event.target.value }))} />
+                      </label>
+                      <CodeEditor language={botForm.language} value={botForm.source} height={300} onChange={(value) => setBotForm((current) => ({ ...current, source: value }))} />
+                      <button className="primary-button" type="button" onClick={() => void handleCreateBot()} disabled={submitting}>
+                        Save bot revision
+                      </button>
+                    </section>
                   </div>
+                  <div>
+                    {/* Bot catalog */}
+                    <section className="panel list-panel" data-testid="bot-catalog-panel">
+                      <div className="panel-header">
+                        <div>
+                          <p className="eyebrow">Registry</p>
+                          <h2>Bot Catalog</h2>
+                        </div>
+                      </div>
+                      <div className="scroll-list compact-list">
+                        {bots.length > 0 ? bots.map((bot) => (
+                          <article key={bot.id} className="list-card">
+                            <h3>{bot.name}</h3>
+                            <p>{bot.description || 'No description'}</p>
+                            <span>{bot.latestRevision.language}</span>
+                          </article>
+                        )) : <p className="muted">No bots stored yet.</p>}
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </div>
+            )}
 
-                  <label>
-                    <span>Description</span>
-                    <input value={botForm.description} onChange={(event) => setBotForm((current) => ({ ...current, description: event.target.value }))} />
-                  </label>
-
-                  <CodeEditor language={botForm.language} value={botForm.source} height={300} onChange={(value) => setBotForm((current) => ({ ...current, source: value }))} />
-
-                  <button className="primary-button" type="button" onClick={() => void handleCreateBot()} disabled={submitting}>
-                    Save bot revision
-                  </button>
-                </section>
-
-                <section className="panel editor-panel" data-testid="arena-panel">
+            {activeTab === 'arenas' && (
+              <div>
+                <div className="page-header">
+                  <div>
+                    <div className="page-title">Arenas</div>
+                    <div className="page-sub">Forge and manage battle arenas</div>
+                  </div>
+                </div>
+                <StatRow chips={[
+                  { label: 'Arenas', value: arenas.length },
+                  { label: 'Bots', value: bots.length },
+                  { label: 'Matches', value: matches.length },
+                ]} />
+                <section className="panel" data-testid="arena-panel">
                   <div className="panel-header">
                     <div>
                       <p className="eyebrow">Arena Forge</p>
@@ -550,7 +609,6 @@ export function App() {
                       Reset sample
                     </button>
                   </div>
-
                   <div className="form-grid two-up">
                     <label>
                       <span>Name</span>
@@ -561,17 +619,28 @@ export function App() {
                       <input value={arenaForm.description} onChange={(event) => setArenaForm((current) => ({ ...current, description: event.target.value }))} />
                     </label>
                   </div>
-
                   <CodeEditor language="arena" value={arenaForm.text} height={280} onChange={(value) => setArenaForm((current) => ({ ...current, text: value }))} />
-
                   <button className="primary-button" type="button" onClick={() => void handleCreateArena()} disabled={submitting}>
                     Save arena
                   </button>
                 </section>
               </div>
+            )}
 
-              <div className="stack-column wide-column">
-                <section className="panel match-panel" data-testid="match-panel">
+            {activeTab === 'matches' && (
+              <div>
+                <div className="page-header">
+                  <div>
+                    <div className="page-title">Matches</div>
+                    <div className="page-sub">Launch, replay, and review matches</div>
+                  </div>
+                </div>
+                <StatRow chips={[
+                  { label: 'Total', value: matches.length },
+                  { label: 'Completed', value: matches.filter((m) => m.status === 'completed').length },
+                  { label: 'Active', value: matches.filter((m) => m.status === 'running' || m.status === 'queued').length },
+                ]} />
+                <section className="panel" data-testid="match-panel">
                   <div className="panel-header">
                     <div>
                       <p className="eyebrow">Operations</p>
@@ -579,7 +648,6 @@ export function App() {
                     </div>
                     <span className="status-pill subtle">API-backed</span>
                   </div>
-
                   <div className="form-grid three-up">
                     <label>
                       <span>Name</span>
@@ -589,7 +657,7 @@ export function App() {
                       <span>Mode</span>
                       <select
                         value={matchForm.mode}
-                        onChange={(event) => setMatchForm((current) => ({ ...current, mode: event.target.value as MatchMode, enqueue: event.target.value === "queued" }))}
+                        onChange={(event) => setMatchForm((current) => ({ ...current, mode: event.target.value as MatchMode, enqueue: event.target.value === 'queued' }))}
                       >
                         <option value="live">Live</option>
                         <option value="queued">Queued</option>
@@ -607,7 +675,6 @@ export function App() {
                       </select>
                     </label>
                   </div>
-
                   <div className="form-grid two-up">
                     <label>
                       <span>Team A bot</span>
@@ -624,8 +691,7 @@ export function App() {
                       </select>
                     </label>
                   </div>
-
-                  <div className="form-grid three-up compact-row">
+                  <div className="form-grid three-up">
                     <label>
                       <span>Seed</span>
                       <input type="number" value={matchForm.seed} onChange={(event) => setMatchForm((current) => ({ ...current, seed: Number(event.target.value) }))} />
@@ -639,14 +705,11 @@ export function App() {
                       <input type="checkbox" checked={matchForm.enqueue} onChange={(event) => setMatchForm((current) => ({ ...current, enqueue: event.target.checked }))} />
                     </label>
                   </div>
-
                   <button className="primary-button" type="button" onClick={() => void handleCreateMatch()} disabled={submitting}>
-                    {matchForm.enqueue || matchForm.mode === "queued" ? "Store and enqueue" : "Store and run now"}
+                    {matchForm.enqueue || matchForm.mode === 'queued' ? 'Store and enqueue' : 'Store and run now'}
                   </button>
                 </section>
-
                 <ReplayViewer match={selectedMatch} />
-
                 <section className="panel list-panel" data-testid="stored-matches-panel">
                   <div className="panel-header">
                     <div>
@@ -656,18 +719,31 @@ export function App() {
                   </div>
                   <div className="scroll-list compact-list">
                     {matches.length > 0 ? matches.map((match) => (
-                      <button key={match.id} className={`match-list-card${selectedMatchId === match.id ? " active" : ""}`} type="button" onClick={() => setSelectedMatchId(match.id)}>
+                      <button key={match.id} className={`match-list-card${selectedMatchId === match.id ? ' active' : ''}`} type="button" onClick={() => setSelectedMatchId(match.id)}>
                         <span className="match-title">{match.name}</span>
-                        <span className="match-meta">{match.participants.map((participant) => participant.botName).join(" vs ")}</span>
+                        <span className="match-meta">{match.participants.map((p) => p.botName).join(' vs ')}</span>
                         <span className="match-meta">{match.status} · {match.mode}</span>
                       </button>
                     )) : <p className="muted">No matches stored yet.</p>}
                   </div>
                 </section>
               </div>
+            )}
 
-              <div className="stack-column side-column">
-                <section className="panel competition-panel" data-testid="ladder-panel">
+            {activeTab === 'compete' && (
+              <div>
+                <div className="page-header">
+                  <div>
+                    <div className="page-title">Compete</div>
+                    <div className="page-sub">Ladders, tournaments, and standings</div>
+                  </div>
+                </div>
+                <StatRow chips={[
+                  { label: 'Ladders', value: ladders.length },
+                  { label: 'Tournaments', value: tournaments.length },
+                  { label: 'Bots', value: bots.length },
+                ]} />
+                <section className="panel" data-testid="ladder-panel">
                   <div className="panel-header">
                     <div>
                       <p className="eyebrow">Ranked Play</p>
@@ -701,11 +777,11 @@ export function App() {
                   </button>
                   <div className="scroll-list competition-list">
                     {ladders.length > 0 ? ladders.map((ladder) => (
-                      <article key={ladder.id} className="list-card ladder-card">
+                      <article key={ladder.id} className="list-card">
                         <div className="card-toolbar">
                           <div>
                             <h3>{ladder.name}</h3>
-                            <p>{ladder.description || "No description"}</p>
+                            <p>{ladder.description || 'No description'}</p>
                           </div>
                           <button className="ghost-button small-button" type="button" onClick={() => void handleLadderChallenge(ladder.id)} disabled={submitting || ladder.entries.length < 2}>
                             Challenge top pair
@@ -726,7 +802,7 @@ export function App() {
                   </div>
                 </section>
 
-                <section className="panel competition-panel" data-testid="tournament-panel">
+                <section className="panel" data-testid="tournament-panel">
                   <div className="panel-header">
                     <div>
                       <p className="eyebrow">Events</p>
@@ -774,64 +850,31 @@ export function App() {
                   </button>
                   <div className="scroll-list competition-list">
                     {tournaments.length > 0 ? tournaments.map((tournament) => (
-                      <article key={tournament.id} className="list-card tournament-card">
+                      <article key={tournament.id} className="list-card">
                         <div className="card-toolbar">
                           <div>
                             <h3>{tournament.name}</h3>
-                            <p>{tournament.description || "No description"}</p>
+                            <p>{tournament.description || 'No description'}</p>
                           </div>
                           <div className="button-cluster">
-                            <button
-                              className="ghost-button small-button"
-                              type="button"
-                              onClick={() => void handleRunTournament(tournament.id, { enqueue: false, limit: 1 })}
-                              disabled={submitting || tournament.summary.pendingMatches === 0}
-                            >
-                              Run next
-                            </button>
-                            <button
-                              className="ghost-button small-button"
-                              type="button"
-                              onClick={() => void handleRunTournament(tournament.id, { enqueue: false })}
-                              disabled={submitting || tournament.summary.pendingMatches === 0}
-                            >
-                              Run all now
-                            </button>
-                            <button
-                              className="ghost-button small-button"
-                              type="button"
-                              onClick={() => void handleRunTournament(tournament.id, { enqueue: true })}
-                              disabled={submitting || tournament.summary.pendingMatches === 0}
-                            >
-                              Enqueue pending
-                            </button>
+                            <button className="ghost-button small-button" type="button" onClick={() => void handleRunTournament(tournament.id, { enqueue: false, limit: 1 })} disabled={submitting || tournament.summary.pendingMatches === 0}>Run next</button>
+                            <button className="ghost-button small-button" type="button" onClick={() => void handleRunTournament(tournament.id, { enqueue: false })} disabled={submitting || tournament.summary.pendingMatches === 0}>Run all now</button>
+                            <button className="ghost-button small-button" type="button" onClick={() => void handleRunTournament(tournament.id, { enqueue: true })} disabled={submitting || tournament.summary.pendingMatches === 0}>Enqueue pending</button>
                           </div>
                         </div>
                         <p className="match-meta">{tournament.format} · {tournament.entries.length} entrants · {tournament.arenaName}</p>
                         <div className="summary-grid">
-                          <div className="summary-chip">
-                            <strong>{tournament.summary.completedMatches}/{tournament.summary.totalMatches}</strong>
-                            <small>completed</small>
-                          </div>
-                          <div className="summary-chip">
-                            <strong>{tournament.summary.pendingMatches}</strong>
-                            <small>pending</small>
-                          </div>
-                          <div className="summary-chip">
-                            <strong>{tournament.summary.queuedMatches + tournament.summary.runningMatches}</strong>
-                            <small>active</small>
-                          </div>
-                          <div className="summary-chip">
-                            <strong>{tournament.summary.failedMatches}</strong>
-                            <small>failed</small>
-                          </div>
+                          <div className="summary-chip"><strong>{tournament.summary.completedMatches}/{tournament.summary.totalMatches}</strong><small>completed</small></div>
+                          <div className="summary-chip"><strong>{tournament.summary.pendingMatches}</strong><small>pending</small></div>
+                          <div className="summary-chip"><strong>{tournament.summary.queuedMatches + tournament.summary.runningMatches}</strong><small>active</small></div>
+                          <div className="summary-chip"><strong>{tournament.summary.failedMatches}</strong><small>failed</small></div>
                         </div>
                         <p className="leader-line">{getTournamentStatusLine(tournament)}</p>
                         <ol className="standing-list compact-standing-list">
                           {tournament.standings.slice(0, 4).map((standing) => (
                             <li key={standing.tournamentEntryId}>
                               <span>#{standing.seed} {standing.botName}</span>
-                              <span>{tournament.format === "round-robin" ? String(standing.points) + " pts" : standing.eliminated ? "out" : "alive"}</span>
+                              <span>{tournament.format === 'round-robin' ? String(standing.points) + ' pts' : standing.eliminated ? 'out' : 'alive'}</span>
                               <small>{standing.wins}-{standing.losses}-{standing.draws}</small>
                             </li>
                           ))}
@@ -851,26 +894,8 @@ export function App() {
                     )) : <p className="muted">No tournaments yet.</p>}
                   </div>
                 </section>
-
-                <section className="panel list-panel">
-                  <div className="panel-header">
-                    <div>
-                      <p className="eyebrow">Registry</p>
-                      <h2>Bot Catalog</h2>
-                    </div>
-                  </div>
-                  <div className="scroll-list compact-list">
-                    {bots.length > 0 ? bots.map((bot) => (
-                      <article key={bot.id} className="list-card compact-card">
-                        <h3>{bot.name}</h3>
-                        <p>{bot.description || "No description"}</p>
-                        <span>{bot.latestRevision.language}</span>
-                      </article>
-                    )) : <p className="muted">No bots stored yet.</p>}
-                  </div>
-                </section>
               </div>
-            </section>
+            )}
           </div>
         </main>
 
