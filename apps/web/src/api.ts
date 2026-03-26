@@ -145,7 +145,7 @@ export interface LadderEntryRecord {
   botRevisionId: string;
   botId: string;
   botName: string;
-  language: string;
+  language: SupportedLanguage;
   revisionVersion: number;
   createdAt: string;
 }
@@ -183,7 +183,7 @@ export interface TournamentEntryRecord {
   botRevisionId: string;
   botId: string;
   botName: string;
-  language: string;
+  language: SupportedLanguage;
   revisionVersion: number;
   seed: number;
   createdAt: string;
@@ -311,7 +311,9 @@ async function requestJson<T>(path: string, options: RequestOptions = {}): Promi
 
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || `Request failed with status ${response.status}`);
+    const err = new Error(message || `Request failed with status ${response.status}`) as Error & { status: number };
+    err.status = response.status;
+    throw err;
   }
 
   return (await response.json()) as T;
@@ -438,6 +440,10 @@ export function deleteArena(arenaId: string): Promise<{ deleted: boolean; id: st
   });
 }
 
+export type MatchRunResponse =
+  | { queued: true; matchId: string; jobId: string; status: "queued" }
+  | { queued: false; match: MatchRecord };
+
 export function listMatches(): Promise<MatchRecord[]> {
   return requestJson<MatchRecord[]>("/api/matches");
 }
@@ -450,15 +456,15 @@ export function createMatch(input: {
   maxTicks: number;
   enqueue: boolean;
   participants: Array<{ botId: string; teamId: "A" | "B" | "C" }>;
-}): Promise<{ match: MatchRecord; run: unknown }> {
-  return requestJson<{ match: MatchRecord; run: unknown }>("/api/matches", {
+}): Promise<{ match: MatchRecord; run: MatchRunResponse }> {
+  return requestJson<{ match: MatchRecord; run: MatchRunResponse }>("/api/matches", {
     method: "POST",
     body: input
   });
 }
 
-export function runMatch(matchId: string, queue: boolean): Promise<unknown> {
-  return requestJson<unknown>(`/api/matches/${matchId}/run${queue ? "?queue=true" : ""}`, {
+export function runMatch(matchId: string, queue: boolean): Promise<MatchRunResponse> {
+  return requestJson<MatchRunResponse>(`/api/matches/${matchId}/run${queue ? "?queue=true" : ""}`, {
     method: "POST"
   });
 }

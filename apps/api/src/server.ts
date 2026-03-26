@@ -57,7 +57,15 @@ const supportedTeams = ["A", "B", "C"] as const;
 const supportedRoles = ["admin", "user"] as const;
 const authRateLimitWindowMs = Number(process.env.PCROBOTS_AUTH_RATE_LIMIT_WINDOW_MS ?? 10 * 60 * 1000);
 const authRateLimitMaxAttempts = Number(process.env.PCROBOTS_AUTH_RATE_LIMIT_MAX_ATTEMPTS ?? 10);
+const corsOrigin = process.env.PCROBOTS_CORS_ORIGIN ?? "*";
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of authAttempts) {
+    if (entry.resetAt <= now) authAttempts.delete(key);
+  }
+}, 5 * 60 * 1000).unref();
 
 type SupportedMode = (typeof supportedModes)[number];
 
@@ -207,7 +215,7 @@ def on_turn(snapshot: dict[str, Any]):
 }
 
 function applyCors(response: ServerResponse): void {
-  response.setHeader("access-control-allow-origin", "*");
+  response.setHeader("access-control-allow-origin", corsOrigin);
   response.setHeader("access-control-allow-methods", "GET,POST,PUT,DELETE,OPTIONS");
   response.setHeader("access-control-allow-headers", "authorization,content-type");
 }
@@ -231,12 +239,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  const maxBytes = 1024 * 1024; // 1 MB
 
   try {
     for await (const chunk of request) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buf.length;
+      if (totalBytes > maxBytes) {
+        throw new HttpError(413, "Request body too large (limit: 1 MB)");
+      }
+      chunks.push(buf);
     }
   } catch (cause) {
+    if (cause instanceof HttpError) throw cause;
     const message = cause instanceof Error ? cause.message : String(cause);
     throw new HttpError(400, `Failed to read request body: ${message}`);
   }
@@ -349,11 +365,16 @@ function parseCreateBotInput(body: unknown): CreateBotInput {
     badRequest("bot payload must be a JSON object");
   }
 
+  const source = expectString(body.source, "source");
+  if (source.length > 100_000) {
+    badRequest("source must not exceed 100,000 characters");
+  }
+
   return {
     name: expectString(body.name, "name"),
     description: typeof body.description === "string" ? body.description.trim() : "",
     language: expectLanguage(body.language),
-    source: expectString(body.source, "source")
+    source
   };
 }
 
@@ -362,10 +383,15 @@ function parseCreateArenaInput(body: unknown): CreateArenaInput {
     badRequest("arena payload must be a JSON object");
   }
 
+  const text = expectString(body.text, "text");
+  if (text.length > 100_000) {
+    badRequest("text must not exceed 100,000 characters");
+  }
+
   return {
     name: expectString(body.name, "name"),
     description: typeof body.description === "string" ? body.description.trim() : "",
-    text: expectString(body.text, "text")
+    text
   };
 }
 
@@ -839,7 +865,12 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       return;
     }
 
-    const auth = path.startsWith("/api/") ? await requireUser(request) : (null as never);
+    if (!path.startsWith("/api/")) {
+      sendError(response, 404, "Not found");
+      return;
+    }
+
+    const auth = await requireUser(request);
 
     if (method === "POST" && path === "/api/auth/logout") {
       await db.deleteSession(auth.token);
@@ -899,7 +930,11 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       const body = await readJsonBody(request);
       const input = parseUpdateUserInput(body);
       try {
-        sendJson(response, 200, await db.updateUser(segments[2], input));
+        const updated = await db.updateUser(segments[2], input);
+        if (input.password) {
+          await db.deleteSessionsForUser(segments[2]);
+        }
+        sendJson(response, 200, updated);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (
@@ -1336,8 +1371,8 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       return;
     }
 
-    const message = error instanceof Error ? error.message : String(error);
-    sendError(response, 500, message);
+    console.error("unhandled request error", error);
+    sendError(response, 500, "Internal server error");
   }
 });
 

@@ -373,8 +373,13 @@ export function App() {
       .then(async (user) => {
         await refreshData(undefined, user);
       })
-      .catch(() => {
-        clearAuthToken();
+      .catch((err: unknown) => {
+        const status = err instanceof Error && 'status' in err ? (err as { status: number }).status : 0;
+        if (status === 401) {
+          clearAuthToken();
+        } else {
+          setError("Failed to restore session. Please reload or sign in again.");
+        }
         setCurrentUser(null);
         setLoading(false);
       });
