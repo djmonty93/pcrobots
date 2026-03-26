@@ -7,9 +7,9 @@ This document defines the host-to-bot contract for interpreted languages in v1.
 - JavaScript
 - TypeScript
 - Python
+- Lua
 
-
-TypeScript is transpiled to JavaScript before execution. Lua remains future work and is not part of the current runtime surface.
+TypeScript is transpiled to JavaScript before execution. Python and Lua run in subprocess-based language runners inside the per-match sandbox container.
 
 ## Host Model
 
@@ -73,7 +73,9 @@ Each match runs inside a short-lived sandbox container that loads the language r
 - bounded CPU time
 - bounded memory
 - bounded process count
-- bounded stdout/stderr`r`n- read-only container rootfs with tmpfs scratch space only`r`n- dropped Linux capabilities with `no-new-privileges``r`n- isolated per-match container lifecycle
+- bounded stdout/stderr
+- read-only container rootfs with tmpfs scratch space only
+- dropped Linux capabilities with `no-new-privileges`
+- isolated per-match container lifecycle
 
 The API that bots see is a modern language-level SDK that maps back to the faithful engine actions.
-

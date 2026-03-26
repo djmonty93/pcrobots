@@ -131,10 +131,47 @@ async function main() {
     body: {
       name: `Smoke Beta ${now}`,
       description: "auth smoke bot",
+      language: "lua",
+      source: `local function on_turn(snapshot)
+  if snapshot.tick == 0 then
+    return { kind = "scan", heading = 180, resolution = 10 }
+  end
+
+  return { kind = "movement", targetSpeed = 100, heading = 180 }
+end
+
+return on_turn
+`
+    }
+  });
+
+  const botGamma = await requestJson("/api/bots", {
+    method: "POST",
+    token: userOneSession.token,
+    body: {
+      name: `Smoke Gamma ${now}`,
+      description: "auth smoke bot",
       language: "python",
       source: `def on_turn(snapshot):
     return {"kind": "movement", "targetSpeed": 100, "heading": 180}
 `
+    }
+  });
+
+  const botDelta = await requestJson("/api/bots", {
+    method: "POST",
+    token: userOneSession.token,
+    body: {
+      name: `Smoke Delta ${now}`,
+      description: "auth smoke bot",
+      language: "javascript",
+      source: `module.exports = function onTurn(snapshot) {
+  if (snapshot.tick === 0) {
+    return { kind: "scan", heading: 0, resolution: 8 };
+  }
+
+  return { kind: "movement", targetSpeed: 40, heading: 0 };
+};`
     }
   });
 
@@ -147,10 +184,10 @@ async function main() {
       text: createArenaText()
     }
   });
-  log("user one created resources", { botAlpha: botAlpha.id, botBeta: botBeta.id, arena: arena.id });
+  log("user one created resources", { botAlpha: botAlpha.id, botBeta: botBeta.id, botGamma: botGamma.id, botDelta: botDelta.id, arena: arena.id });
 
   const userTwoBotsBeforeTransfer = await requestJson("/api/bots", { token: userTwoSession.token });
-  if (userTwoBotsBeforeTransfer.some((bot) => bot.id === botAlpha.id || bot.id === botBeta.id)) {
+  if (userTwoBotsBeforeTransfer.some((bot) => bot.id === botAlpha.id || bot.id === botBeta.id || bot.id === botGamma.id || bot.id === botDelta.id)) {
     throw new Error("User two can see user one bots before transfer");
   }
   await requestExpectFailure(`/api/bots/${botAlpha.id}`, 404, { token: userTwoSession.token });
@@ -193,13 +230,18 @@ async function main() {
     token: adminSession.token,
     body: { targetUserId: userTwoRecord.id }
   });
-  if (transfer.bots < 2 || transfer.arenas < 1 || transfer.matches < 1) {
+  if (transfer.bots < 4 || transfer.arenas < 1 || transfer.matches < 1) {
     throw new Error(`Ownership transfer moved an unexpected number of resources: ${JSON.stringify(transfer)}`);
   }
   log("transferred ownership", transfer);
 
   const userTwoBotsAfterTransfer = await requestJson("/api/bots", { token: userTwoSession.token });
-  if (!userTwoBotsAfterTransfer.some((bot) => bot.id === botAlpha.id) || !userTwoBotsAfterTransfer.some((bot) => bot.id === botBeta.id)) {
+  if (
+    !userTwoBotsAfterTransfer.some((bot) => bot.id === botAlpha.id) ||
+    !userTwoBotsAfterTransfer.some((bot) => bot.id === botBeta.id) ||
+    !userTwoBotsAfterTransfer.some((bot) => bot.id === botGamma.id) ||
+    !userTwoBotsAfterTransfer.some((bot) => bot.id === botDelta.id)
+  ) {
     throw new Error("Transferred bots did not become visible to user two");
   }
 
@@ -228,7 +270,7 @@ async function main() {
       arenaId: arena.id,
       maxTicks: 140,
       seedBase: 9000,
-      entryBotIds: [botAlpha.id, botBeta.id]
+      entryBotIds: [botAlpha.id, botBeta.id, botGamma.id, botDelta.id]
     }
   });
   log("created tournament", { id: tournament.id, rounds: tournament.rounds.length });

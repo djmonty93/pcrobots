@@ -7,7 +7,7 @@ import {
   type CommandMap,
   type MatchState
 } from "@pcrobots/engine";
-import { loadJavaScriptBot, loadPythonBot } from "@pcrobots/bot-sdk";
+import { loadJavaScriptBot, loadLuaBot } from "@pcrobots/bot-sdk";
 import {
   type AccessScope,
   createLadder,
@@ -50,7 +50,7 @@ await retry(async () => {
   await matchQueue.waitUntilReady();
 }, { label: "api bootstrap" });
 
-const supportedLanguages = ["javascript", "typescript", "python"] as const;
+const supportedLanguages = ["javascript", "typescript", "python", "lua"] as const;
 const supportedModes = ["live", "queued", "ladder", "round-robin", "single-elimination", "double-elimination"] as const;
 const supportedTournamentFormats = ["round-robin", "single-elimination", "double-elimination"] as const;
 const supportedTeams = ["A", "B", "C"] as const;
@@ -189,16 +189,19 @@ function createRuntimeDemo(): MatchState {
     `
   });
 
-  const beta = loadPythonBot("beta", {
-    language: "python",
+  const beta = loadLuaBot("beta", {
+    language: "lua",
     source: `
-from typing import Any
+local function on_turn(snapshot)
+  local tick = snapshot.tick
+  if tick < 3 then
+    return { kind = "invisibility", enabled = true }
+  end
 
-def on_turn(snapshot: dict[str, Any]):
-    tick = snapshot["tick"]
-    if tick < 3:
-        return {"kind": "invisibility", "enabled": True}
-    return {"kind": "movement", "targetSpeed": 20, "heading": 180}
+  return { kind = "movement", targetSpeed = 20, heading = 180 }
+end
+
+return on_turn
 `
   });
 

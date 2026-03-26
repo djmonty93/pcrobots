@@ -3,7 +3,7 @@ import { Pool, type PoolClient } from "pg";
 
 import { bootstrapSql } from "./schema.js";
 
-export type SupportedLanguage = "javascript" | "typescript" | "python";
+export type SupportedLanguage = "javascript" | "typescript" | "python" | "lua";
 export type TeamId = "A" | "B" | "C";
 export type UserRole = "admin" | "user";
 export type MatchMode =

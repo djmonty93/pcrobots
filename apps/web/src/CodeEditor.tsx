@@ -17,6 +17,7 @@ const monacoLanguageMap: Record<CodeEditorProps["language"], string> = {
   javascript: "javascript",
   typescript: "typescript",
   python: "python",
+  lua: "lua",
   arena: "plaintext"
 };
 

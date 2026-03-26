@@ -37,12 +37,15 @@ CREATE INDEX IF NOT EXISTS bots_owner_user_id_idx ON bots(owner_user_id, created
 CREATE TABLE IF NOT EXISTS bot_revisions (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  language TEXT NOT NULL CHECK (language IN ('javascript', 'typescript', 'python')),
+  language TEXT NOT NULL CHECK (language IN ('javascript', 'typescript', 'python', 'lua')),
   source TEXT NOT NULL,
   version INTEGER NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (bot_id, version)
 );
+
+ALTER TABLE bot_revisions DROP CONSTRAINT IF EXISTS bot_revisions_language_check;
+ALTER TABLE bot_revisions ADD CONSTRAINT bot_revisions_language_check CHECK (language IN ('javascript', 'typescript', 'python', 'lua'));
 
 CREATE INDEX IF NOT EXISTS bot_revisions_bot_id_idx ON bot_revisions(bot_id, version DESC);
 

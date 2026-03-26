@@ -26,6 +26,7 @@ test("buildSandboxDockerArgs applies strict container isolation flags", () => {
   assert.ok(args.includes("node"));
   assert.ok(args.includes("--env"));
   assert.ok(args.includes("PCROBOTS_PYTHON_BIN=python"));
+  assert.ok(args.includes("PCROBOTS_LUA_BIN=lua5.4"));
   assert.equal(args.at(-3), "pcrobots-worker:latest");
   assert.equal(args.at(-2), "node");
   assert.equal(args.at(-1), "/app/packages/platform/dist/platform/src/sandbox-runner.js");

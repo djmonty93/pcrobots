@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 
 import { type MatchParticipantRecord, type MatchRecord } from "./db.js";
 import { simulateMatch, applyEliminationTiebreak } from "./execution.js";
@@ -18,6 +19,19 @@ function makeParticipant(id: string, language: string, teamId: "A" | "B", slot: 
     teamId,
     slot
   };
+}
+
+function hasLuaRuntime(): boolean {
+  const candidates = [...new Set([process.env.PCROBOTS_LUA_BIN, "lua5.4", "lua54", "lua"].filter(Boolean))];
+
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate!, ["-v"], { encoding: "utf8", timeout: 2000 });
+    if (!(result.error && "code" in result.error && result.error.code === "ENOENT")) {
+      return !result.error;
+    }
+  }
+
+  return false;
 }
 
 function makeMatch(participants: MatchParticipantRecord[]): MatchRecord {
@@ -54,6 +68,23 @@ test("simulateMatch throws for unsupported language", () => {
     () => simulateMatch(makeMatch(participants)),
     /Unsupported bot language rust/
   );
+});
+
+test("simulateMatch accepts Lua bots when a Lua runtime is available", { skip: !hasLuaRuntime() }, () => {
+  const participants = [
+    {
+      ...makeParticipant("p1", "lua", "A", 0),
+      source: `return function(snapshot)
+  return { kind = "noop" }
+end`
+    },
+    makeParticipant("p2", "javascript", "B", 1)
+  ];
+
+  const simulated = simulateMatch(makeMatch(participants));
+
+  assert.equal(Array.isArray(simulated.events), true);
+  assert.equal(typeof simulated.result.finished, "boolean");
 });
 
 test("applyEliminationTiebreak uses battery as secondary tiebreak when armour is equal", () => {
