@@ -57,6 +57,7 @@ const supportedTeams = ["A", "B", "C"] as const;
 const supportedRoles = ["admin", "user"] as const;
 const authRateLimitWindowMs = Number(process.env.PCROBOTS_AUTH_RATE_LIMIT_WINDOW_MS ?? 10 * 60 * 1000);
 const authRateLimitMaxAttempts = Number(process.env.PCROBOTS_AUTH_RATE_LIMIT_MAX_ATTEMPTS ?? 10);
+const corsOrigin = process.env.PCROBOTS_CORS_ORIGIN ?? "*";
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
 
 setInterval(() => {
@@ -214,7 +215,7 @@ def on_turn(snapshot: dict[str, Any]):
 }
 
 function applyCors(response: ServerResponse): void {
-  response.setHeader("access-control-allow-origin", "*");
+  response.setHeader("access-control-allow-origin", corsOrigin);
   response.setHeader("access-control-allow-methods", "GET,POST,PUT,DELETE,OPTIONS");
   response.setHeader("access-control-allow-headers", "authorization,content-type");
 }
@@ -864,7 +865,12 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       return;
     }
 
-    const auth = path.startsWith("/api/") ? await requireUser(request) : (null as never);
+    if (!path.startsWith("/api/")) {
+      sendError(response, 404, "Not found");
+      return;
+    }
+
+    const auth = await requireUser(request);
 
     if (method === "POST" && path === "/api/auth/logout") {
       await db.deleteSession(auth.token);
