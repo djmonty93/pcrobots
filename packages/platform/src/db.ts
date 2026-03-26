@@ -355,7 +355,7 @@ function verifyPassword(password: string, passwordHash: string): boolean {
     return false;
   }
 
-  const actual = scryptSync(password, salt, expectedHex.length / 2);
+  const actual = scryptSync(password, salt, 64);
   const expected = Buffer.from(expectedHex, "hex");
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
@@ -524,11 +524,12 @@ export class Database {
     await this.pool.query(bootstrapSql);
     const admin = await this.ensureDefaultAdmin();
     await this.backfillLegacyOwnership(admin.id);
+    await this.pool.query(`DELETE FROM sessions WHERE expires_at <= NOW()`);
   }
 
   async listUsers(): Promise<UserRecord[]> {
-    const result = await this.pool.query<UserRow>(`
-      SELECT id, email, password_hash, role, is_active, created_at, updated_at
+    const result = await this.pool.query<Omit<UserRow, "password_hash">>(`
+      SELECT id, email, role, is_active, created_at, updated_at
       FROM users
       ORDER BY created_at ASC
     `);
@@ -537,8 +538,8 @@ export class Database {
   }
 
   async getUser(userId: string): Promise<UserRecord | null> {
-    const result = await this.pool.query<UserRow>(`
-      SELECT id, email, password_hash, role, is_active, created_at, updated_at
+    const result = await this.pool.query<Omit<UserRow, "password_hash">>(`
+      SELECT id, email, role, is_active, created_at, updated_at
       FROM users
       WHERE id = $1
     `, [userId]);
@@ -547,8 +548,8 @@ export class Database {
   }
 
   async getUserByEmail(email: string): Promise<UserRecord | null> {
-    const result = await this.pool.query<UserRow>(`
-      SELECT id, email, password_hash, role, is_active, created_at, updated_at
+    const result = await this.pool.query<Omit<UserRow, "password_hash">>(`
+      SELECT id, email, role, is_active, created_at, updated_at
       FROM users
       WHERE email = $1
     `, [normalizeEmail(email)]);
