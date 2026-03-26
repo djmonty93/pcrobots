@@ -9,6 +9,7 @@ import {
 } from "@pcrobots/engine";
 import { loadJavaScriptBot, loadPythonBot } from "@pcrobots/bot-sdk";
 import {
+  type AccessScope,
   createLadder,
   createLadderChallenge,
   createMatchQueue,
@@ -23,12 +24,16 @@ import {
   listTournaments,
   type CreateArenaInput,
   type CreateBotInput,
+  type CreateUserInput,
   type CreateMatchInput,
   type CreateLadderInput,
   type CreateTournamentInput,
   type LadderRecord,
   type MatchRecord,
   type SupportedLanguage,
+  type UpdateUserInput,
+  type UserRecord,
+  type UserRole,
   retry,
   type TeamId,
   type TournamentFormat,
@@ -49,6 +54,10 @@ const supportedLanguages = ["javascript", "typescript", "python"] as const;
 const supportedModes = ["live", "queued", "ladder", "round-robin", "single-elimination", "double-elimination"] as const;
 const supportedTournamentFormats = ["round-robin", "single-elimination", "double-elimination"] as const;
 const supportedTeams = ["A", "B", "C"] as const;
+const supportedRoles = ["admin", "user"] as const;
+const authRateLimitWindowMs = Number(process.env.PCROBOTS_AUTH_RATE_LIMIT_WINDOW_MS ?? 10 * 60 * 1000);
+const authRateLimitMaxAttempts = Number(process.env.PCROBOTS_AUTH_RATE_LIMIT_MAX_ATTEMPTS ?? 10);
+const authAttempts = new Map<string, { count: number; resetAt: number }>();
 
 type SupportedMode = (typeof supportedModes)[number];
 
@@ -69,6 +78,14 @@ function badRequest(message: string, details?: unknown): never {
 
 function conflict(message: string, details?: unknown): never {
   throw new HttpError(409, message, details);
+}
+
+function unauthorized(message: string, details?: unknown): never {
+  throw new HttpError(401, message, details);
+}
+
+function forbidden(message: string, details?: unknown): never {
+  throw new HttpError(403, message, details);
 }
 
 function createDemoArenaText(): string {
@@ -191,8 +208,8 @@ def on_turn(snapshot: dict[str, Any]):
 
 function applyCors(response: ServerResponse): void {
   response.setHeader("access-control-allow-origin", "*");
-  response.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
-  response.setHeader("access-control-allow-headers", "content-type");
+  response.setHeader("access-control-allow-methods", "GET,POST,PUT,DELETE,OPTIONS");
+  response.setHeader("access-control-allow-headers", "authorization,content-type");
 }
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown): void {
@@ -248,6 +265,14 @@ function expectString(value: unknown, fieldName: string): string {
   return value.trim();
 }
 
+function expectOptionalString(value: unknown, fieldName: string): string | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  return expectString(value, fieldName);
+}
+
 function expectInteger(value: unknown, fieldName: string, fallback?: number): number {
   const candidate = value ?? fallback;
   if (typeof candidate !== "number" || !Number.isInteger(candidate)) {
@@ -259,6 +284,14 @@ function expectInteger(value: unknown, fieldName: string, fallback?: number): nu
 
 function expectBoolean(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function expectRole(value: unknown): UserRole {
+  if (typeof value !== "string" || !supportedRoles.includes(value as UserRole)) {
+    badRequest(`role must be one of: ${supportedRoles.join(", ")}`);
+  }
+
+  return value as UserRole;
 }
 
 function expectStringArray(value: unknown, fieldName: string): string[] {
@@ -387,6 +420,7 @@ function parseCreateLadderInput(body: unknown): CreateLadderInput {
   }
 
   return {
+    ownerUserId: "",
     name: expectString(body.name, "name"),
     description: typeof body.description === "string" ? body.description.trim() : "",
     arenaId: typeof body.arenaId === "string" ? body.arenaId.trim() : undefined,
@@ -407,6 +441,7 @@ function parseCreateTournamentInput(body: unknown): CreateTournamentInput {
   }
 
   return {
+    ownerUserId: "",
     name: expectString(body.name, "name"),
     description: typeof body.description === "string" ? body.description.trim() : "",
     format: expectTournamentFormat(body.format),
@@ -416,6 +451,145 @@ function parseCreateTournamentInput(body: unknown): CreateTournamentInput {
     seedBase: expectInteger(body.seedBase, "seedBase", 1),
     entryBotIds
   };
+}
+
+function parseLoginRequest(body: unknown): { email: string; password: string } {
+  if (!isRecord(body)) {
+    badRequest("login payload must be a JSON object");
+  }
+
+  return {
+    email: expectString(body.email, "email"),
+    password: expectString(body.password, "password")
+  };
+}
+
+function parseCreateUserInput(body: unknown): CreateUserInput {
+  if (!isRecord(body)) {
+    badRequest("user payload must be a JSON object");
+  }
+
+  return {
+    email: expectString(body.email, "email"),
+    password: expectString(body.password, "password"),
+    role: expectRole(body.role),
+    isActive: typeof body.isActive === "boolean" ? body.isActive : true
+  };
+}
+
+function parseRegisterRequest(body: unknown): { email: string; password: string } {
+  if (!isRecord(body)) {
+    badRequest("registration payload must be a JSON object");
+  }
+
+  return {
+    email: expectString(body.email, "email"),
+    password: expectString(body.password, "password")
+  };
+}
+
+function parseUpdateUserInput(body: unknown): UpdateUserInput {
+  if (!isRecord(body)) {
+    badRequest("user payload must be a JSON object");
+  }
+
+  return {
+    email: expectOptionalString(body.email, "email"),
+    password: expectOptionalString(body.password, "password"),
+    role: body.role === undefined ? undefined : expectRole(body.role),
+    isActive: typeof body.isActive === "boolean" ? body.isActive : undefined
+  };
+}
+
+function parseChangePasswordRequest(body: unknown): { currentPassword: string; nextPassword: string } {
+  if (!isRecord(body)) {
+    badRequest("password payload must be a JSON object");
+  }
+
+  return {
+    currentPassword: expectString(body.currentPassword, "currentPassword"),
+    nextPassword: expectString(body.nextPassword, "nextPassword")
+  };
+}
+
+function parseOwnershipTransferRequest(body: unknown): { targetUserId: string } {
+  if (!isRecord(body)) {
+    badRequest("transfer payload must be a JSON object");
+  }
+
+  return {
+    targetUserId: expectString(body.targetUserId, "targetUserId")
+  };
+}
+
+function toScope(user: UserRecord): AccessScope {
+  return { userId: user.id, role: user.role };
+}
+
+function extractBearerToken(request: IncomingMessage): string | null {
+  const header = request.headers.authorization;
+  if (!header) {
+    return null;
+  }
+
+  const [scheme, token] = header.split(/\s+/, 2);
+  if (!scheme || !token || scheme.toLowerCase() !== "bearer") {
+    return null;
+  }
+
+  return token.trim();
+}
+
+async function requireUser(request: IncomingMessage): Promise<{ token: string; user: UserRecord; scope: AccessScope }> {
+  const token = extractBearerToken(request);
+  if (!token) {
+    unauthorized("authentication required");
+  }
+
+  const user = await db.getUserBySessionToken(token);
+  if (!user) {
+    unauthorized("invalid or expired session");
+  }
+
+  return {
+    token,
+    user,
+    scope: toScope(user)
+  };
+}
+
+function requireAdmin(user: UserRecord): void {
+  if (user.role !== "admin") {
+    forbidden("admin access required");
+  }
+}
+
+function getClientAddress(request: IncomingMessage): string {
+  return request.socket.remoteAddress ?? "unknown";
+}
+
+function getAuthAttemptKey(request: IncomingMessage, email: string): string {
+  return `${getClientAddress(request)}:${email.trim().toLowerCase()}`;
+}
+
+function consumeAuthAttempt(key: string): void {
+  const now = Date.now();
+  const current = authAttempts.get(key);
+  if (!current || current.resetAt <= now) {
+    authAttempts.set(key, { count: 1, resetAt: now + authRateLimitWindowMs });
+    return;
+  }
+
+  if (current.count >= authRateLimitMaxAttempts) {
+    throw new HttpError(429, "Too many authentication attempts. Try again later.");
+  }
+
+  current.count += 1;
+  authAttempts.set(key, current);
+}
+
+function clearAuthAttempts(key: string): void {
+  authAttempts.delete(key);
 }
 
 function parseLadderChallengeRequest(body: unknown, ladder: LadderRecord): { seed: number; enqueue: boolean; entryAId?: string; entryBId?: string } {
@@ -489,6 +663,43 @@ async function queueStoredMatch(match: MatchRecord): Promise<{ matchId: string; 
   }
 }
 
+async function ensureMatchResourcesAccessible(user: UserRecord, input: CreateMatchInput): Promise<void> {
+  const scope = toScope(user);
+
+  if (input.arenaRevisionId) {
+    const arenaRevision = await db.getArenaRevision(input.arenaRevisionId, scope);
+    if (!arenaRevision) {
+      badRequest(`Arena revision ${input.arenaRevisionId} was not found`);
+    }
+  } else if (input.arenaId) {
+    const arena = await db.getArena(input.arenaId, scope);
+    if (!arena) {
+      badRequest(`Arena ${input.arenaId} was not found`);
+    }
+  } else {
+    badRequest("arenaId or arenaRevisionId is required");
+  }
+
+  for (const participant of input.participants) {
+    if (participant.botRevisionId) {
+      const botRevision = await db.getBotRevision(participant.botRevisionId, scope);
+      if (!botRevision) {
+        badRequest(`Bot revision ${participant.botRevisionId} was not found`);
+      }
+      continue;
+    }
+
+    if (!participant.botId) {
+      badRequest("Each participant must provide botId or botRevisionId");
+    }
+
+    const bot = await db.getBot(participant.botId, scope);
+    if (!bot) {
+      badRequest(`Bot ${participant.botId} was not found`);
+    }
+  }
+}
+
 async function runOrQueueMatch(match: MatchRecord, forceQueue: boolean): Promise<{ statusCode: number; payload: unknown }> {
   if (forceQueue || match.mode === "queued") {
     const queued = await queueStoredMatch(match);
@@ -535,19 +746,34 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     if (method === "GET" && path === "/api/spec") {
       sendJson(response, 200, {
         product: "pcrobots",
-        status: "competition scaffold",
+        status: "multi-user competition scaffold",
         supportedLanguages,
         competitionModes: supportedModes,
         tournamentFormats: supportedTournamentFormats,
+        roles: supportedRoles,
         endpoints: [
           "GET /health",
           "GET /api/spec",
+          "POST /api/auth/login",
+          "POST /api/auth/register",
+          "POST /api/auth/logout",
+          "GET /api/auth/me",
+          "PUT /api/auth/me/password",
+          "GET /api/users",
+          "POST /api/users",
+          "PUT /api/users/:id",
+          "DELETE /api/users/:id",
+          "POST /api/users/:id/transfer-ownership",
           "GET /api/bots",
           "POST /api/bots",
           "GET /api/bots/:id",
+          "PUT /api/bots/:id",
+          "DELETE /api/bots/:id",
           "GET /api/arenas",
           "POST /api/arenas",
           "GET /api/arenas/:id",
+          "PUT /api/arenas/:id",
+          "DELETE /api/arenas/:id",
           "GET /api/matches",
           "POST /api/matches",
           "GET /api/matches/:id",
@@ -568,6 +794,175 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       return;
     }
 
+    if (method === "POST" && path === "/api/auth/login") {
+      const body = await readJsonBody(request);
+      const credentials = parseLoginRequest(body);
+      const rateLimitKey = getAuthAttemptKey(request, credentials.email);
+      consumeAuthAttempt(rateLimitKey);
+      const user = await db.authenticateUser(credentials.email, credentials.password);
+      if (!user) {
+        unauthorized("invalid email or password");
+      }
+
+      const session = await db.createSession(user.id);
+      clearAuthAttempts(rateLimitKey);
+      sendJson(response, 200, session);
+      return;
+    }
+
+    if (method === "POST" && path === "/api/auth/register") {
+      const body = await readJsonBody(request);
+      const input = parseRegisterRequest(body);
+      const rateLimitKey = getAuthAttemptKey(request, input.email);
+      consumeAuthAttempt(rateLimitKey);
+
+      try {
+        const user = await db.createUser({
+          email: input.email,
+          password: input.password,
+          role: "user",
+          isActive: true
+        });
+        const session = await db.createSession(user.id);
+        clearAuthAttempts(rateLimitKey);
+        sendJson(response, 201, session);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (
+          message.includes("already exists") ||
+          message.includes("Password must be")
+        ) {
+          conflict(message);
+        }
+        throw error;
+      }
+      return;
+    }
+
+    const auth = path.startsWith("/api/") ? await requireUser(request) : (null as never);
+
+    if (method === "POST" && path === "/api/auth/logout") {
+      await db.deleteSession(auth.token);
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+
+    if (method === "GET" && path === "/api/auth/me") {
+      sendJson(response, 200, auth.user);
+      return;
+    }
+
+    if (method === "PUT" && path === "/api/auth/me/password") {
+      const body = await readJsonBody(request);
+      const input = parseChangePasswordRequest(body);
+      const matches = await db.verifyUserPassword(auth.user.id, input.currentPassword);
+      if (!matches) {
+        unauthorized("current password is incorrect");
+      }
+
+      await db.updateOwnPassword(auth.user.id, input.nextPassword);
+      await db.deleteSessionsForUser(auth.user.id, auth.token);
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+
+    if (method === "GET" && path === "/api/users") {
+      requireAdmin(auth.user);
+      sendJson(response, 200, await db.listUsers());
+      return;
+    }
+
+    if (method === "POST" && path === "/api/users") {
+      requireAdmin(auth.user);
+      const body = await readJsonBody(request);
+      const input = parseCreateUserInput(body);
+      try {
+        sendJson(response, 201, await db.createUser(input));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("already exists") || message.includes("Password must be")) {
+          conflict(message);
+        }
+        throw error;
+      }
+      return;
+    }
+
+    if (method === "PUT" && segments[0] === "api" && segments[1] === "users" && segments.length === 3) {
+      requireAdmin(auth.user);
+      const existingUser = await db.getUser(segments[2]);
+      if (!existingUser) {
+        sendError(response, 404, `User ${segments[2]} was not found`);
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      const input = parseUpdateUserInput(body);
+      try {
+        sendJson(response, 200, await db.updateUser(segments[2], input));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (
+          message.includes("already exists") ||
+          message.includes("At least one active admin") ||
+          message.includes("Password must be")
+        ) {
+          conflict(message);
+        }
+        throw error;
+      }
+      return;
+    }
+
+    if (method === "DELETE" && segments[0] === "api" && segments[1] === "users" && segments.length === 3) {
+      requireAdmin(auth.user);
+      if (segments[2] === auth.user.id) {
+        conflict("You cannot delete the account you are currently signed into");
+      }
+
+      try {
+        const deleted = await db.deleteUser(segments[2]);
+        if (!deleted) {
+          sendError(response, 404, `User ${segments[2]} was not found`);
+          return;
+        }
+
+        sendJson(response, 200, { deleted: true, id: segments[2] });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("cannot be deleted") || message.includes("At least one active admin")) {
+          conflict(message);
+        }
+        throw error;
+      }
+      return;
+    }
+
+    if (method === "POST" && segments[0] === "api" && segments[1] === "users" && segments[3] === "transfer-ownership" && segments.length === 4) {
+      requireAdmin(auth.user);
+      if (segments[2] === auth.user.id) {
+        conflict("Transfer ownership from another account or sign in as a different admin");
+      }
+
+      const body = await readJsonBody(request);
+      const input = parseOwnershipTransferRequest(body);
+
+      try {
+        sendJson(response, 200, await db.transferOwnership(segments[2], input.targetUserId));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (
+          message.includes("must be different") ||
+          message.includes("was not found") ||
+          message.includes("is inactive")
+        ) {
+          conflict(message);
+        }
+        throw error;
+      }
+      return;
+    }
+
     if (method === "GET" && path === "/api/demo-match") {
       sendJson(response, 200, createDemoMatch());
       return;
@@ -584,19 +979,19 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     }
 
     if (method === "GET" && path === "/api/bots") {
-      sendJson(response, 200, await db.listBots());
+      sendJson(response, 200, await db.listBots(auth.scope));
       return;
     }
 
     if (method === "POST" && path === "/api/bots") {
       const body = await readJsonBody(request);
       const input = parseCreateBotInput(body);
-      sendJson(response, 201, await db.createBot(input));
+      sendJson(response, 201, await db.createBot(input, auth.user.id));
       return;
     }
 
     if (method === "GET" && segments[0] === "api" && segments[1] === "bots" && segments.length === 3) {
-      const bot = await db.getBot(segments[2]);
+      const bot = await db.getBot(segments[2], auth.scope);
       if (!bot) {
         sendError(response, 404, `Bot ${segments[2]} was not found`);
         return;
@@ -606,8 +1001,48 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       return;
     }
 
+    if (method === "PUT" && segments[0] === "api" && segments[1] === "bots" && segments.length === 3) {
+      const existingBot = await db.getBot(segments[2], auth.scope);
+      if (!existingBot) {
+        sendError(response, 404, `Bot ${segments[2]} was not found`);
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      const input = parseCreateBotInput(body);
+      sendJson(response, 200, await db.updateBot(segments[2], input));
+      return;
+    }
+
+    if (method === "DELETE" && segments[0] === "api" && segments[1] === "bots" && segments.length === 3) {
+      const existingBot = await db.getBot(segments[2], auth.scope);
+      if (!existingBot) {
+        sendError(response, 404, `Bot ${segments[2]} was not found`);
+        return;
+      }
+
+      let deleted: boolean;
+      try {
+        deleted = await db.deleteBot(segments[2]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("cannot be deleted")) {
+          conflict(message);
+        }
+        throw error;
+      }
+
+      if (!deleted) {
+        sendError(response, 404, `Bot ${segments[2]} was not found`);
+        return;
+      }
+
+      sendJson(response, 200, { deleted: true, id: segments[2] });
+      return;
+    }
+
     if (method === "GET" && path === "/api/arenas") {
-      sendJson(response, 200, await db.listArenas());
+      sendJson(response, 200, await db.listArenas(auth.scope));
       return;
     }
 
@@ -615,12 +1050,12 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       const body = await readJsonBody(request);
       const input = parseCreateArenaInput(body);
       parseArenaText(input.text);
-      sendJson(response, 201, await db.createArena(input));
+      sendJson(response, 201, await db.createArena(input, auth.user.id));
       return;
     }
 
     if (method === "GET" && segments[0] === "api" && segments[1] === "arenas" && segments.length === 3) {
-      const arena = await db.getArena(segments[2]);
+      const arena = await db.getArena(segments[2], auth.scope);
       if (!arena) {
         sendError(response, 404, `Arena ${segments[2]} was not found`);
         return;
@@ -630,15 +1065,57 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       return;
     }
 
+    if (method === "PUT" && segments[0] === "api" && segments[1] === "arenas" && segments.length === 3) {
+      const existingArena = await db.getArena(segments[2], auth.scope);
+      if (!existingArena) {
+        sendError(response, 404, `Arena ${segments[2]} was not found`);
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      const input = parseCreateArenaInput(body);
+      parseArenaText(input.text);
+      sendJson(response, 200, await db.updateArena(segments[2], input));
+      return;
+    }
+
+    if (method === "DELETE" && segments[0] === "api" && segments[1] === "arenas" && segments.length === 3) {
+      const existingArena = await db.getArena(segments[2], auth.scope);
+      if (!existingArena) {
+        sendError(response, 404, `Arena ${segments[2]} was not found`);
+        return;
+      }
+
+      let deleted: boolean;
+      try {
+        deleted = await db.deleteArena(segments[2]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("cannot be deleted")) {
+          conflict(message);
+        }
+        throw error;
+      }
+
+      if (!deleted) {
+        sendError(response, 404, `Arena ${segments[2]} was not found`);
+        return;
+      }
+
+      sendJson(response, 200, { deleted: true, id: segments[2] });
+      return;
+    }
+
     if (method === "GET" && path === "/api/matches") {
-      sendJson(response, 200, await db.listMatches());
+      sendJson(response, 200, await db.listMatches(auth.scope));
       return;
     }
 
     if (method === "POST" && path === "/api/matches") {
       const body = await readJsonBody(request);
       const requestPayload = parseCreateMatchRequest(body);
-      const match = await db.createMatch(requestPayload.input);
+      await ensureMatchResourcesAccessible(auth.user, requestPayload.input);
+      const match = await db.createMatch(requestPayload.input, auth.user.id);
       const outcome = await runOrQueueMatch(match, requestPayload.enqueue);
       sendJson(response, requestPayload.enqueue || match.mode === "queued" ? 202 : 201, {
         match,
@@ -648,7 +1125,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     }
 
     if (method === "GET" && segments[0] === "api" && segments[1] === "matches" && segments.length === 3) {
-      const match = await db.getMatch(segments[2]);
+      const match = await db.getMatch(segments[2], auth.scope);
       if (!match) {
         sendError(response, 404, `Match ${segments[2]} was not found`);
         return;
@@ -659,7 +1136,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     }
 
     if (method === "POST" && segments[0] === "api" && segments[1] === "matches" && segments[3] === "run" && segments.length === 4) {
-      const match = await db.getMatch(segments[2]);
+      const match = await db.getMatch(segments[2], auth.scope);
       if (!match) {
         sendError(response, 404, `Match ${segments[2]} was not found`);
         return;
@@ -672,19 +1149,38 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     }
 
     if (method === "GET" && path === "/api/ladders") {
-      sendJson(response, 200, await listLadders(db));
+      sendJson(response, 200, await listLadders(db, auth.scope));
       return;
     }
 
     if (method === "POST" && path === "/api/ladders") {
       const body = await readJsonBody(request);
       const input = parseCreateLadderInput(body);
-      sendJson(response, 201, await createLadder(db, input));
+      if (input.arenaRevisionId) {
+        const arenaRevision = await db.getArenaRevision(input.arenaRevisionId, auth.scope);
+        if (!arenaRevision) {
+          badRequest(`Arena revision ${input.arenaRevisionId} was not found`);
+        }
+      } else if (input.arenaId) {
+        const arena = await db.getArena(input.arenaId, auth.scope);
+        if (!arena) {
+          badRequest(`Arena ${input.arenaId} was not found`);
+        }
+      }
+
+      for (const botId of input.entryBotIds) {
+        const bot = await db.getBot(botId, auth.scope);
+        if (!bot) {
+          badRequest(`Bot ${botId} was not found`);
+        }
+      }
+
+      sendJson(response, 201, await createLadder(db, { ...input, ownerUserId: auth.user.id }));
       return;
     }
 
     if (method === "GET" && segments[0] === "api" && segments[1] === "ladders" && segments.length === 3) {
-      const ladder = await getLadder(db, segments[2]);
+      const ladder = await getLadder(db, segments[2], auth.scope);
       if (!ladder) {
         sendError(response, 404, `Ladder ${segments[2]} was not found`);
         return;
@@ -695,7 +1191,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     }
 
     if (method === "POST" && segments[0] === "api" && segments[1] === "ladders" && segments[3] === "challenge" && segments.length === 4) {
-      const ladder = await getLadder(db, segments[2]);
+      const ladder = await getLadder(db, segments[2], auth.scope);
       if (!ladder) {
         sendError(response, 404, `Ladder ${segments[2]} was not found`);
         return;
@@ -719,19 +1215,38 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     }
 
     if (method === "GET" && path === "/api/tournaments") {
-      sendJson(response, 200, await listTournaments(db));
+      sendJson(response, 200, await listTournaments(db, auth.scope));
       return;
     }
 
     if (method === "POST" && path === "/api/tournaments") {
       const body = await readJsonBody(request);
       const input = parseCreateTournamentInput(body);
-      sendJson(response, 201, await createTournament(db, input));
+      if (input.arenaRevisionId) {
+        const arenaRevision = await db.getArenaRevision(input.arenaRevisionId, auth.scope);
+        if (!arenaRevision) {
+          badRequest(`Arena revision ${input.arenaRevisionId} was not found`);
+        }
+      } else if (input.arenaId) {
+        const arena = await db.getArena(input.arenaId, auth.scope);
+        if (!arena) {
+          badRequest(`Arena ${input.arenaId} was not found`);
+        }
+      }
+
+      for (const botId of input.entryBotIds) {
+        const bot = await db.getBot(botId, auth.scope);
+        if (!bot) {
+          badRequest(`Bot ${botId} was not found`);
+        }
+      }
+
+      sendJson(response, 201, await createTournament(db, { ...input, ownerUserId: auth.user.id }));
       return;
     }
 
     if (method === "GET" && segments[0] === "api" && segments[1] === "tournaments" && segments.length === 3) {
-      const tournament = await getTournament(db, segments[2]);
+      const tournament = await getTournament(db, segments[2], auth.scope);
       if (!tournament) {
         sendError(response, 404, `Tournament ${segments[2]} was not found`);
         return;
@@ -742,7 +1257,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     }
 
     if (method === "POST" && segments[0] === "api" && segments[1] === "tournaments" && segments[3] === "run-pending" && segments.length === 4) {
-      const tournament = await getTournament(db, segments[2]);
+      const tournament = await getTournament(db, segments[2], auth.scope);
       if (!tournament) {
         sendError(response, 404, `Tournament ${segments[2]} was not found`);
         return;

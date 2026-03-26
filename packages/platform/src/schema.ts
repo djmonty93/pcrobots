@@ -1,4 +1,28 @@
 export const bootstrapSql = `
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user',
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'user'));
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id, expires_at DESC);
+
 CREATE TABLE IF NOT EXISTS bots (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -6,6 +30,9 @@ CREATE TABLE IF NOT EXISTS bots (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS owner_user_id TEXT REFERENCES users(id);
+CREATE INDEX IF NOT EXISTS bots_owner_user_id_idx ON bots(owner_user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS bot_revisions (
   id TEXT PRIMARY KEY,
@@ -26,6 +53,9 @@ CREATE TABLE IF NOT EXISTS arenas (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE arenas ADD COLUMN IF NOT EXISTS owner_user_id TEXT REFERENCES users(id);
+CREATE INDEX IF NOT EXISTS arenas_owner_user_id_idx ON arenas(owner_user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS arena_revisions (
   id TEXT PRIMARY KEY,
@@ -48,6 +78,9 @@ CREATE TABLE IF NOT EXISTS ladders (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE ladders ADD COLUMN IF NOT EXISTS owner_user_id TEXT REFERENCES users(id);
+CREATE INDEX IF NOT EXISTS ladders_owner_user_id_idx ON ladders(owner_user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS ladder_entries (
   id TEXT PRIMARY KEY,
   ladder_id TEXT NOT NULL REFERENCES ladders(id) ON DELETE CASCADE,
@@ -69,6 +102,9 @@ CREATE TABLE IF NOT EXISTS tournaments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE tournaments ADD COLUMN IF NOT EXISTS owner_user_id TEXT REFERENCES users(id);
+CREATE INDEX IF NOT EXISTS tournaments_owner_user_id_idx ON tournaments(owner_user_id, created_at DESC);
 
 ALTER TABLE tournaments DROP CONSTRAINT IF EXISTS tournaments_format_check;
 ALTER TABLE tournaments ADD CONSTRAINT tournaments_format_check CHECK (format IN ('round-robin', 'single-elimination', 'double-elimination'));
@@ -114,6 +150,7 @@ CREATE TABLE IF NOT EXISTS matches (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS owner_user_id TEXT REFERENCES users(id);
 ALTER TABLE matches ADD COLUMN IF NOT EXISTS ladder_id TEXT REFERENCES ladders(id) ON DELETE SET NULL;
 ALTER TABLE matches ADD COLUMN IF NOT EXISTS tournament_id TEXT REFERENCES tournaments(id) ON DELETE SET NULL;
 ALTER TABLE matches ADD COLUMN IF NOT EXISTS tournament_round_id TEXT REFERENCES tournament_rounds(id) ON DELETE SET NULL;
@@ -124,6 +161,7 @@ ALTER TABLE matches DROP CONSTRAINT IF EXISTS matches_status_check;
 ALTER TABLE matches ADD CONSTRAINT matches_status_check CHECK (status IN ('pending', 'queued', 'running', 'completed', 'failed'));
 
 CREATE INDEX IF NOT EXISTS matches_status_idx ON matches(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS matches_owner_user_id_idx ON matches(owner_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS matches_ladder_id_idx ON matches(ladder_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS matches_tournament_id_idx ON matches(tournament_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS matches_tournament_round_id_idx ON matches(tournament_round_id, created_at DESC);

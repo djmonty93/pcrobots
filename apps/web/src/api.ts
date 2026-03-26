@@ -2,6 +2,58 @@ export type SupportedLanguage = "javascript" | "typescript" | "python";
 export type MatchMode = "live" | "queued" | "ladder" | "round-robin" | "single-elimination" | "double-elimination";
 export type MatchStatus = "pending" | "queued" | "running" | "completed" | "failed";
 export type TournamentFormat = "round-robin" | "single-elimination" | "double-elimination";
+export type UserRole = "admin" | "user";
+
+const authStorageKey = "pcrobots-auth-token";
+
+function readStorage(kind: "sessionStorage" | "localStorage", key: string): string | null {
+  try {
+    return window[kind].getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(kind: "sessionStorage" | "localStorage", key: string, value: string): void {
+  try {
+    window[kind].setItem(key, value);
+  } catch {
+    // storage unavailable
+  }
+}
+
+function removeStorage(kind: "sessionStorage" | "localStorage", key: string): void {
+  try {
+    window[kind].removeItem(key);
+  } catch {
+    // storage unavailable
+  }
+}
+
+export interface UserRecord {
+  id: string;
+  email: string;
+  role: UserRole;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AuthSession {
+  token: string;
+  expiresAt: string;
+  user: UserRecord;
+}
+
+export interface OwnershipTransferResult {
+  fromUserId: string;
+  toUserId: string;
+  bots: number;
+  arenas: number;
+  ladders: number;
+  tournaments: number;
+  matches: number;
+}
 
 export interface BotRevision {
   id: string;
@@ -14,6 +66,8 @@ export interface BotRevision {
 
 export interface BotRecord {
   id: string;
+  ownerUserId: string | null;
+  ownerEmail: string | null;
   name: string;
   description: string;
   createdAt: string;
@@ -31,6 +85,8 @@ export interface ArenaRevision {
 
 export interface ArenaRecord {
   id: string;
+  ownerUserId: string | null;
+  ownerEmail: string | null;
   name: string;
   description: string;
   createdAt: string;
@@ -59,6 +115,8 @@ export interface MatchEvent {
 
 export interface MatchRecord {
   id: string;
+  ownerUserId: string | null;
+  ownerEmail: string | null;
   name: string;
   mode: MatchMode;
   status: MatchStatus;
@@ -105,6 +163,8 @@ export interface LadderStandingRecord {
 
 export interface LadderRecord {
   id: string;
+  ownerUserId: string | null;
+  ownerEmail: string | null;
   name: string;
   description: string;
   arenaRevisionId: string;
@@ -167,6 +227,8 @@ export interface TournamentRoundRecord {
 
 export interface TournamentRecord {
   id: string;
+  ownerUserId: string | null;
+  ownerEmail: string | null;
   name: string;
   description: string;
   format: TournamentFormat;
@@ -196,12 +258,52 @@ interface RequestOptions {
   body?: unknown;
 }
 
+export function getAuthToken(): string | null {
+  const sessionToken = readStorage("sessionStorage", authStorageKey);
+  if (sessionToken) {
+    return sessionToken;
+  }
+
+  const legacyToken = readStorage("localStorage", authStorageKey);
+  if (legacyToken) {
+    writeStorage("sessionStorage", authStorageKey, legacyToken);
+    removeStorage("localStorage", authStorageKey);
+  }
+
+  return legacyToken;
+}
+
+export function setAuthToken(token: string): void {
+  writeStorage("sessionStorage", authStorageKey, token);
+  removeStorage("localStorage", authStorageKey);
+}
+
+export function clearAuthToken(): void {
+  removeStorage("sessionStorage", authStorageKey);
+  removeStorage("localStorage", authStorageKey);
+}
+
+export interface BotInput {
+  name: string;
+  description?: string;
+  language: SupportedLanguage;
+  source: string;
+}
+
+export interface ArenaInput {
+  name: string;
+  description?: string;
+  text: string;
+}
+
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 
 async function requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const authToken = getAuthToken();
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: options.method ?? "GET",
     headers: {
+      ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
       "content-type": "application/json"
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body)
@@ -215,19 +317,100 @@ async function requestJson<T>(path: string, options: RequestOptions = {}): Promi
   return (await response.json()) as T;
 }
 
+export function login(input: { email: string; password: string }): Promise<AuthSession> {
+  return requestJson<AuthSession>("/api/auth/login", {
+    method: "POST",
+    body: input
+  });
+}
+
+export function register(input: { email: string; password: string }): Promise<AuthSession> {
+  return requestJson<AuthSession>("/api/auth/register", {
+    method: "POST",
+    body: input
+  });
+}
+
+export function logout(): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>("/api/auth/logout", {
+    method: "POST"
+  });
+}
+
+export function getCurrentUser(): Promise<UserRecord> {
+  return requestJson<UserRecord>("/api/auth/me");
+}
+
+export function changeOwnPassword(input: { currentPassword: string; nextPassword: string }): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>("/api/auth/me/password", {
+    method: "PUT",
+    body: input
+  });
+}
+
+export function listUsers(): Promise<UserRecord[]> {
+  return requestJson<UserRecord[]>("/api/users");
+}
+
+export function createUser(input: {
+  email: string;
+  password: string;
+  role: UserRole;
+  isActive: boolean;
+}): Promise<UserRecord> {
+  return requestJson<UserRecord>("/api/users", {
+    method: "POST",
+    body: input
+  });
+}
+
+export function updateUser(
+  userId: string,
+  input: { email?: string; password?: string; role?: UserRole; isActive?: boolean }
+): Promise<UserRecord> {
+  return requestJson<UserRecord>(`/api/users/${userId}`, {
+    method: "PUT",
+    body: input
+  });
+}
+
+export function deleteUser(userId: string): Promise<{ deleted: boolean; id: string }> {
+  return requestJson<{ deleted: boolean; id: string }>(`/api/users/${userId}`, {
+    method: "DELETE"
+  });
+}
+
+export function transferUserOwnership(
+  userId: string,
+  targetUserId: string
+): Promise<OwnershipTransferResult> {
+  return requestJson<OwnershipTransferResult>(`/api/users/${userId}/transfer-ownership`, {
+    method: "POST",
+    body: { targetUserId }
+  });
+}
+
 export function listBots(): Promise<BotRecord[]> {
   return requestJson<BotRecord[]>("/api/bots");
 }
 
-export function createBot(input: {
-  name: string;
-  description?: string;
-  language: SupportedLanguage;
-  source: string;
-}): Promise<BotRecord> {
+export function createBot(input: BotInput): Promise<BotRecord> {
   return requestJson<BotRecord>("/api/bots", {
     method: "POST",
     body: input
+  });
+}
+
+export function updateBot(botId: string, input: BotInput): Promise<BotRecord> {
+  return requestJson<BotRecord>(`/api/bots/${botId}`, {
+    method: "PUT",
+    body: input
+  });
+}
+
+export function deleteBot(botId: string): Promise<{ deleted: boolean; id: string }> {
+  return requestJson<{ deleted: boolean; id: string }>(`/api/bots/${botId}`, {
+    method: "DELETE"
   });
 }
 
@@ -235,10 +418,23 @@ export function listArenas(): Promise<ArenaRecord[]> {
   return requestJson<ArenaRecord[]>("/api/arenas");
 }
 
-export function createArena(input: { name: string; description?: string; text: string }): Promise<ArenaRecord> {
+export function createArena(input: ArenaInput): Promise<ArenaRecord> {
   return requestJson<ArenaRecord>("/api/arenas", {
     method: "POST",
     body: input
+  });
+}
+
+export function updateArena(arenaId: string, input: ArenaInput): Promise<ArenaRecord> {
+  return requestJson<ArenaRecord>(`/api/arenas/${arenaId}`, {
+    method: "PUT",
+    body: input
+  });
+}
+
+export function deleteArena(arenaId: string): Promise<{ deleted: boolean; id: string }> {
+  return requestJson<{ deleted: boolean; id: string }>(`/api/arenas/${arenaId}`, {
+    method: "DELETE"
   });
 }
 

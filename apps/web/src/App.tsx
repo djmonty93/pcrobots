@@ -1,24 +1,43 @@
 import { startTransition, useEffect, useMemo, useState } from "react";
 
 import {
+  changeOwnPassword,
+  clearAuthToken,
   challengeLadder,
   createArena,
   createBot,
   createLadder,
   createMatch,
   createTournament,
+  createUser,
+  deleteArena,
+  deleteBot,
+  deleteUser,
+  getAuthToken,
+  getCurrentUser,
+  login,
   listArenas,
   listBots,
   listLadders,
   listMatches,
   listTournaments,
+  listUsers,
+  logout,
+  register,
   runTournamentMatches,
+  setAuthToken,
+  transferUserOwnership,
+  updateArena,
+  updateBot,
+  updateUser,
   type ArenaRecord,
   type BotRecord,
   type LadderRecord,
   type MatchMode,
   type MatchRecord,
   type SupportedLanguage,
+  type UserRecord,
+  type UserRole,
   type TournamentFormat,
   type TournamentRecord
 } from "./api.js";
@@ -111,6 +130,29 @@ function createInitialTournamentState() {
   };
 }
 
+function createInitialLoginState() {
+  return {
+    email: "",
+    password: ""
+  };
+}
+
+function createInitialPasswordState() {
+  return {
+    currentPassword: "",
+    nextPassword: ""
+  };
+}
+
+function createInitialUserState() {
+  return {
+    email: "",
+    password: "",
+    role: "user" as UserRole,
+    isActive: true
+  };
+}
+
 function toggleSelection(values: string[], value: string): string[] {
   return values.includes(value) ? values.filter((entry) => entry !== value) : [...values, value];
 }
@@ -184,7 +226,12 @@ function getTournamentStatusLine(tournament: TournamentRecord): string {
   return "No leader yet";
 }
 
-type Tab = 'bots' | 'arenas' | 'matches' | 'compete';
+function OwnerLabel({ ownerEmail, isAdmin }: { ownerEmail: string | null; isAdmin: boolean }) {
+  if (!isAdmin) return null;
+  return <p className="match-meta">{ownerEmail ? `Owner: ${ownerEmail}` : "Owner: unknown"}</p>;
+}
+
+type Tab = "bots" | "arenas" | "matches" | "compete" | "accounts";
 
 function StatRow(props: { chips: Array<{ label: string; value: number | string }> }) {
   return (
@@ -200,6 +247,8 @@ function StatRow(props: { chips: Array<{ label: string; value: number | string }
 }
 
 export function App() {
+  const [currentUser, setCurrentUser] = useState<UserRecord | null>(null);
+  const [users, setUsers] = useState<UserRecord[]>([]);
   const [bots, setBots] = useState<BotRecord[]>([]);
   const [arenas, setArenas] = useState<ArenaRecord[]>([]);
   const [matches, setMatches] = useState<MatchRecord[]>([]);
@@ -211,14 +260,23 @@ export function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [botForm, setBotForm] = useState(createInitialBotState);
+  const [editingBotId, setEditingBotId] = useState<string | null>(null);
+  const [botFilter, setBotFilter] = useState("");
   const [arenaForm, setArenaForm] = useState(createInitialArenaState);
+  const [editingArenaId, setEditingArenaId] = useState<string | null>(null);
+  const [arenaFilter, setArenaFilter] = useState("");
   const [matchForm, setMatchForm] = useState(createInitialMatchState);
   const [ladderForm, setLadderForm] = useState(createInitialLadderState);
   const [tournamentForm, setTournamentForm] = useState(createInitialTournamentState);
+  const [loginForm, setLoginForm] = useState(createInitialLoginState);
+  const [passwordForm, setPasswordForm] = useState(createInitialPasswordState);
+  const [userForm, setUserForm] = useState(createInitialUserState);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [transferTargetUserId, setTransferTargetUserId] = useState("");
 
-  const [activeTab, setActiveTab] = useState<Tab>('bots');
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    let initial: 'dark' | 'light' = 'dark';
+  const [activeTab, setActiveTab] = useState<Tab>("bots");
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    let initial: "dark" | "light" = "dark";
     try {
       initial = (localStorage.getItem('pcrobots-theme') as 'dark' | 'light' | null) ?? 'dark';
     } catch {
@@ -241,20 +299,34 @@ export function App() {
     });
   }
 
-  async function refreshData(preferredMatchId?: string): Promise<void> {
+  async function refreshData(preferredMatchId?: string, user = currentUser): Promise<void> {
+    if (!user) {
+      setLoading(false);
+      setBots([]);
+      setArenas([]);
+      setMatches([]);
+      setLadders([]);
+      setTournaments([]);
+      setUsers([]);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      const [nextBots, nextArenas, nextMatches, nextLadders, nextTournaments] = await Promise.all([
+      const [nextBots, nextArenas, nextMatches, nextLadders, nextTournaments, nextUsers] = await Promise.all([
         listBots(),
         listArenas(),
         listMatches(),
         listLadders(),
-        listTournaments()
+        listTournaments(),
+        user.role === "admin" ? listUsers() : Promise.resolve([])
       ]);
 
       startTransition(() => {
+        setCurrentUser(user);
+        setUsers(nextUsers);
         setBots(nextBots);
         setArenas(nextArenas);
         setMatches(nextMatches);
@@ -291,22 +363,329 @@ export function App() {
   }
 
   useEffect(() => {
-    void refreshData();
+    const token = getAuthToken();
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
+    void getCurrentUser()
+      .then(async (user) => {
+        await refreshData(undefined, user);
+      })
+      .catch(() => {
+        clearAuthToken();
+        setCurrentUser(null);
+        setLoading(false);
+      });
   }, []);
 
   const selectedMatch = useMemo(
     () => matches.find((match) => match.id === selectedMatchId) ?? null,
     [matches, selectedMatchId]
   );
+  const filteredBots = useMemo(() => {
+    const query = botFilter.trim().toLowerCase();
+    if (!query) {
+      return bots;
+    }
 
-  async function handleCreateBot(): Promise<void> {
+    return bots.filter((bot) =>
+      [bot.name, bot.description, bot.latestRevision.language]
+        .join(" ")
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [botFilter, bots]);
+  const filteredArenas = useMemo(() => {
+    const query = arenaFilter.trim().toLowerCase();
+    if (!query) {
+      return arenas;
+    }
+
+    return arenas.filter((arena) =>
+      [arena.name, arena.description]
+        .join(" ")
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [arenaFilter, arenas]);
+  const ownershipCounts = useMemo(() => {
+    const counts = new Map<string, { bots: number; arenas: number; ladders: number; tournaments: number; matches: number }>();
+    const ensure = (userId: string | null | undefined) => {
+      if (!userId) {
+        return null;
+      }
+      const current = counts.get(userId) ?? { bots: 0, arenas: 0, ladders: 0, tournaments: 0, matches: 0 };
+      counts.set(userId, current);
+      return current;
+    };
+
+    for (const bot of bots) {
+      const current = ensure(bot.ownerUserId);
+      if (current) {
+        current.bots += 1;
+      }
+    }
+    for (const arena of arenas) {
+      const current = ensure(arena.ownerUserId);
+      if (current) {
+        current.arenas += 1;
+      }
+    }
+    for (const ladder of ladders) {
+      const current = ensure(ladder.ownerUserId);
+      if (current) {
+        current.ladders += 1;
+      }
+    }
+    for (const tournament of tournaments) {
+      const current = ensure(tournament.ownerUserId);
+      if (current) {
+        current.tournaments += 1;
+      }
+    }
+    for (const match of matches) {
+      const current = ensure(match.ownerUserId);
+      if (current) {
+        current.matches += 1;
+      }
+    }
+
+    return counts;
+  }, [arenas, bots, ladders, matches, tournaments]);
+
+  function resetBotEditor(): void {
+    setEditingBotId(null);
+    setBotForm(createInitialBotState());
+  }
+
+  function resetArenaEditor(): void {
+    setEditingArenaId(null);
+    setArenaForm(createInitialArenaState());
+  }
+
+  function resetUserEditor(): void {
+    setEditingUserId(null);
+    setTransferTargetUserId("");
+    setUserForm(createInitialUserState());
+  }
+
+  function startEditingBot(bot: BotRecord): void {
+    setEditingBotId(bot.id);
+    setBotForm({
+      name: bot.name,
+      description: bot.description,
+      language: bot.latestRevision.language,
+      source: bot.latestRevision.source
+    });
+  }
+
+  function startEditingArena(arena: ArenaRecord): void {
+    setEditingArenaId(arena.id);
+    setArenaForm({
+      name: arena.name,
+      description: arena.description,
+      text: arena.latestRevision.text
+    });
+  }
+
+  function duplicateBot(bot: BotRecord): void {
+    setActiveTab("bots");
+    setEditingBotId(null);
+    setBotForm({
+      name: `Copy of ${bot.name}`,
+      description: bot.description,
+      language: bot.latestRevision.language,
+      source: bot.latestRevision.source
+    });
+    setMessage(`Loaded ${bot.name} into the editor as a new bot copy`);
+    setError(null);
+  }
+
+  function duplicateArena(arena: ArenaRecord): void {
+    setActiveTab("arenas");
+    setEditingArenaId(null);
+    setArenaForm({
+      name: `Copy of ${arena.name}`,
+      description: arena.description,
+      text: arena.latestRevision.text
+    });
+    setMessage(`Loaded ${arena.name} into the editor as a new arena copy`);
+    setError(null);
+  }
+
+  function startEditingUser(user: UserRecord): void {
+    setEditingUserId(user.id);
+    setTransferTargetUserId("");
+    setUserForm({
+      email: user.email,
+      password: "",
+      role: user.role,
+      isActive: user.isActive
+    });
+  }
+
+  async function handleLogin(): Promise<void> {
     setSubmitting(true);
     setMessage(null);
     setError(null);
 
     try {
-      const bot = await createBot(botForm);
-      setMessage(`Saved ${bot.name}`);
+      const session = await login(loginForm);
+      setAuthToken(session.token);
+      setCurrentUser(session.user);
+      await refreshData(undefined, session.user);
+      setMessage(`Signed in as ${session.user.email}`);
+    } catch (loginError) {
+      clearAuthToken();
+      setCurrentUser(null);
+      setError(loginError instanceof Error ? loginError.message : String(loginError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleRegister(): Promise<void> {
+    setSubmitting(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const session = await register(loginForm);
+      setAuthToken(session.token);
+      setCurrentUser(session.user);
+      await refreshData(undefined, session.user);
+      setMessage(`Created and signed into ${session.user.email}`);
+    } catch (registerError) {
+      clearAuthToken();
+      setCurrentUser(null);
+      setError(registerError instanceof Error ? registerError.message : String(registerError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleLogout(): Promise<void> {
+    setSubmitting(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      await logout();
+    } catch {
+      // session may already be gone server-side
+    } finally {
+      clearAuthToken();
+      setCurrentUser(null);
+      setUsers([]);
+      setBots([]);
+      setArenas([]);
+      setMatches([]);
+      setLadders([]);
+      setTournaments([]);
+      setSelectedMatchId(null);
+      setSubmitting(false);
+    }
+  }
+
+  async function handleChangePassword(): Promise<void> {
+    setSubmitting(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      await changeOwnPassword(passwordForm);
+      setPasswordForm(createInitialPasswordState());
+      setMessage("Updated password");
+    } catch (passwordError) {
+      setError(passwordError instanceof Error ? passwordError.message : String(passwordError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSaveUser(): Promise<void> {
+    setSubmitting(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const savedUser = editingUserId
+        ? await updateUser(editingUserId, {
+            email: userForm.email,
+            password: userForm.password || undefined,
+            role: userForm.role,
+            isActive: userForm.isActive
+          })
+        : await createUser(userForm);
+
+      resetUserEditor();
+      setMessage(editingUserId ? `Updated ${savedUser.email}` : `Created ${savedUser.email}`);
+      await refreshData();
+    } catch (userError) {
+      setError(userError instanceof Error ? userError.message : String(userError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteUser(user: UserRecord): Promise<void> {
+    if (!window.confirm(`Delete account "${user.email}"? This only works if the account does not own any resources.`)) {
+      return;
+    }
+
+    setSubmitting(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      await deleteUser(user.id);
+      if (editingUserId === user.id) {
+        resetUserEditor();
+      }
+      setMessage(`Deleted ${user.email}`);
+      await refreshData();
+    } catch (userError) {
+      setError(userError instanceof Error ? userError.message : String(userError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleTransferOwnership(): Promise<void> {
+    if (!editingUserId || !transferTargetUserId) {
+      setError("Select a destination user before transferring ownership.");
+      return;
+    }
+
+    setSubmitting(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const result = await transferUserOwnership(editingUserId, transferTargetUserId);
+      setMessage(
+        `Transferred ${result.bots} bots, ${result.arenas} arenas, ${result.ladders} ladders, ${result.tournaments} tournaments, and ${result.matches} matches`
+      );
+      setTransferTargetUserId("");
+      await refreshData();
+    } catch (transferError) {
+      setError(transferError instanceof Error ? transferError.message : String(transferError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSaveBot(): Promise<void> {
+    setSubmitting(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const bot = editingBotId ? await updateBot(editingBotId, botForm) : await createBot(botForm);
+      setMessage(editingBotId ? `Updated ${bot.name}` : `Saved ${bot.name}`);
+      resetBotEditor();
       await refreshData();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : String(createError));
@@ -315,17 +694,64 @@ export function App() {
     }
   }
 
-  async function handleCreateArena(): Promise<void> {
+  async function handleDeleteBot(bot: BotRecord): Promise<void> {
+    if (!window.confirm(`Delete bot "${bot.name}"? This only works if it is not referenced by matches or competitions.`)) {
+      return;
+    }
+
     setSubmitting(true);
     setMessage(null);
     setError(null);
 
     try {
-      const arena = await createArena(arenaForm);
-      setMessage(`Saved arena ${arena.name}`);
+      await deleteBot(bot.id);
+      if (editingBotId === bot.id) {
+        resetBotEditor();
+      }
+      setMessage(`Deleted ${bot.name}`);
+      await refreshData();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSaveArena(): Promise<void> {
+    setSubmitting(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const arena = editingArenaId ? await updateArena(editingArenaId, arenaForm) : await createArena(arenaForm);
+      setMessage(editingArenaId ? `Updated arena ${arena.name}` : `Saved arena ${arena.name}`);
+      resetArenaEditor();
       await refreshData();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : String(createError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteArena(arena: ArenaRecord): Promise<void> {
+    if (!window.confirm(`Delete arena "${arena.name}"? This only works if it is not referenced by matches or competitions.`)) {
+      return;
+    }
+
+    setSubmitting(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      await deleteArena(arena.id);
+      if (editingArenaId === arena.id) {
+        resetArenaEditor();
+      }
+      setMessage(`Deleted arena ${arena.name}`);
+      await refreshData();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
     } finally {
       setSubmitting(false);
     }
@@ -446,6 +872,57 @@ export function App() {
     }
   }
 
+  if (!currentUser) {
+    return (
+      <div className="shell">
+        <div className="content-wrap">
+          <main className="content">
+            <div className="content-inner login-frame">
+            <section className="panel" data-testid="login-panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Access</p>
+                  <h2>Sign In</h2>
+                </div>
+              </div>
+              {error ? <span className="message error">{error}</span> : null}
+              {message ? <span className="message success">{message}</span> : null}
+              <form onSubmit={(e) => { e.preventDefault(); void handleLogin(); }}>
+                <div className="form-grid two-up">
+                  <label>
+                    <span>Email</span>
+                    <input
+                      type="email"
+                      value={loginForm.email}
+                      onChange={(event) => setLoginForm((current) => ({ ...current, email: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      value={loginForm.password}
+                      onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))}
+                    />
+                  </label>
+                </div>
+                <div className="button-cluster">
+                  <button className="primary-button" type="submit" disabled={submitting || loading}>
+                    {loading ? "Checking session..." : "Sign in"}
+                  </button>
+                  <button className="ghost-button" type="button" onClick={() => void handleRegister()} disabled={submitting || loading}>
+                    Create user account
+                  </button>
+                </div>
+              </form>
+            </section>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="shell">
       {/* ── Desktop Sidebar ── */}
@@ -477,13 +954,20 @@ export function App() {
             <span className="nav-icon">⚔</span> Compete
             <span className="nav-badge">{ladders.length + tournaments.length}</span>
           </button>
+          <button className={`nav-item${activeTab === 'accounts' ? ' active' : ''}`} onClick={() => setActiveTab('accounts')}>
+            <span className="nav-icon">👤</span> Accounts
+            <span className="nav-badge">{currentUser.role === "admin" ? users.length : 1}</span>
+          </button>
         </div>
         <div className="sidebar-footer">
           <div className="avatar">P</div>
           <div className="user-info">
-            <div className="user-name">PCRobots</div>
-            <div className="user-role">Ops Deck</div>
+            <div className="user-name">{currentUser.email}</div>
+            <div className="user-role">{currentUser.role}</div>
           </div>
+          <button className="ghost-button small-button" type="button" onClick={() => void handleLogout()} disabled={submitting}>
+            Sign out
+          </button>
           <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
@@ -514,6 +998,21 @@ export function App() {
               {error ? <span className="message error">{error}</span> : null}
             </div>
 
+            <section className="panel">
+              <div className="card-toolbar">
+                <div>
+                  <p className="eyebrow">Access Scope</p>
+                  <h2>{currentUser.role === "admin" ? "Admin workspace" : "User workspace"}</h2>
+                  <p>
+                    {currentUser.role === "admin"
+                      ? "You can manage all accounts and view every stored bot, arena, match, ladder, and tournament."
+                      : "You can work with your own bots and arenas, run your own test matches, and enter your own bots in competitions."}
+                  </p>
+                </div>
+                <span className="status-pill subtle">{currentUser.email}</span>
+              </div>
+            </section>
+
             {activeTab === 'bots' && (
               <div>
                 <div className="page-header">
@@ -534,15 +1033,22 @@ export function App() {
                       <div className="panel-header">
                         <div>
                           <p className="eyebrow">Bot Lab</p>
-                          <h2>Create Bot</h2>
+                          <h2>{editingBotId ? "Edit Bot" : "Create Bot"}</h2>
                         </div>
-                        <button
-                          className="ghost-button"
-                          type="button"
-                          onClick={() => setBotForm((current) => ({ ...current, source: defaultBotTemplates[current.language] }))}
-                        >
-                          Load template
-                        </button>
+                        <div className="button-cluster">
+                          {editingBotId ? (
+                            <button className="ghost-button" type="button" onClick={resetBotEditor} disabled={submitting}>
+                              Cancel edit
+                            </button>
+                          ) : null}
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => setBotForm((current) => ({ ...current, source: defaultBotTemplates[current.language] }))}
+                          >
+                            Load template
+                          </button>
+                        </div>
                       </div>
                       <div className="form-grid two-up">
                         <label>
@@ -569,8 +1075,8 @@ export function App() {
                         <input value={botForm.description} onChange={(event) => setBotForm((current) => ({ ...current, description: event.target.value }))} />
                       </label>
                       <CodeEditor language={botForm.language} value={botForm.source} height={300} onChange={(value) => setBotForm((current) => ({ ...current, source: value }))} />
-                      <button className="primary-button" type="button" onClick={() => void handleCreateBot()} disabled={submitting}>
-                        Save bot revision
+                      <button className="primary-button" type="button" onClick={() => void handleSaveBot()} disabled={submitting}>
+                        {editingBotId ? "Save bot changes" : "Save bot revision"}
                       </button>
                     </section>
                   </div>
@@ -583,14 +1089,38 @@ export function App() {
                           <h2>Bot Catalog</h2>
                         </div>
                       </div>
+                      <label>
+                        <span>Filter bots</span>
+                        <input
+                          value={botFilter}
+                          onChange={(event) => setBotFilter(event.target.value)}
+                          placeholder="Search by name, description, or language"
+                        />
+                      </label>
                       <div className="scroll-list compact-list">
-                        {bots.length > 0 ? bots.map((bot) => (
+                        {filteredBots.length > 0 ? filteredBots.map((bot) => (
                           <article key={bot.id} className="list-card">
-                            <h3>{bot.name}</h3>
-                            <p>{bot.description || 'No description'}</p>
-                            <span>{bot.latestRevision.language}</span>
+                            <div className="card-toolbar">
+                              <div>
+                              <h3>{bot.name}</h3>
+                              <p>{bot.description || 'No description'}</p>
+                              <OwnerLabel ownerEmail={bot.ownerEmail} isAdmin={currentUser.role === "admin"} />
+                            </div>
+                              <div className="button-cluster">
+                                <button className="ghost-button small-button" type="button" onClick={() => duplicateBot(bot)} disabled={submitting}>
+                                  Duplicate
+                                </button>
+                                <button className="ghost-button small-button" type="button" onClick={() => startEditingBot(bot)} disabled={submitting}>
+                                  Edit
+                                </button>
+                                <button className="ghost-button small-button" type="button" onClick={() => void handleDeleteBot(bot)} disabled={submitting}>
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                            <span>{bot.latestRevision.language} · v{bot.latestRevision.version}</span>
                           </article>
-                        )) : <p className="muted">No bots stored yet.</p>}
+                        )) : <p className="muted">{bots.length > 0 ? "No bots match the current filter." : "No bots stored yet."}</p>}
                       </div>
                     </section>
                   </div>
@@ -615,11 +1145,18 @@ export function App() {
                   <div className="panel-header">
                     <div>
                       <p className="eyebrow">Arena Forge</p>
-                      <h2>Create Arena</h2>
+                      <h2>{editingArenaId ? "Edit Arena" : "Create Arena"}</h2>
                     </div>
-                    <button className="ghost-button" type="button" onClick={() => setArenaForm(createInitialArenaState())}>
-                      Reset sample
-                    </button>
+                    <div className="button-cluster">
+                      {editingArenaId ? (
+                        <button className="ghost-button" type="button" onClick={resetArenaEditor} disabled={submitting}>
+                          Cancel edit
+                        </button>
+                      ) : null}
+                      <button className="ghost-button" type="button" onClick={resetArenaEditor}>
+                        Reset sample
+                      </button>
+                    </div>
                   </div>
                   <div className="form-grid two-up">
                     <label>
@@ -632,9 +1169,50 @@ export function App() {
                     </label>
                   </div>
                   <CodeEditor language="arena" value={arenaForm.text} height={280} onChange={(value) => setArenaForm((current) => ({ ...current, text: value }))} />
-                  <button className="primary-button" type="button" onClick={() => void handleCreateArena()} disabled={submitting}>
-                    Save arena
+                  <button className="primary-button" type="button" onClick={() => void handleSaveArena()} disabled={submitting}>
+                    {editingArenaId ? "Save arena changes" : "Save arena"}
                   </button>
+                </section>
+                <section className="panel list-panel" data-testid="arena-registry-panel">
+                  <div className="panel-header">
+                    <div>
+                      <p className="eyebrow">Registry</p>
+                      <h2>Existing Arenas</h2>
+                    </div>
+                  </div>
+                  <label>
+                    <span>Filter arenas</span>
+                    <input
+                      value={arenaFilter}
+                      onChange={(event) => setArenaFilter(event.target.value)}
+                      placeholder="Search by name or description"
+                    />
+                  </label>
+                  <div className="scroll-list compact-list">
+                    {filteredArenas.length > 0 ? filteredArenas.map((arena) => (
+                      <article key={arena.id} className="list-card">
+                        <div className="card-toolbar">
+                          <div>
+                            <h3>{arena.name}</h3>
+                            <p>{arena.description || 'No description'}</p>
+                            <OwnerLabel ownerEmail={arena.ownerEmail} isAdmin={currentUser.role === "admin"} />
+                          </div>
+                          <div className="button-cluster">
+                            <button className="ghost-button small-button" type="button" onClick={() => duplicateArena(arena)} disabled={submitting}>
+                              Duplicate
+                            </button>
+                            <button className="ghost-button small-button" type="button" onClick={() => startEditingArena(arena)} disabled={submitting}>
+                              Edit
+                            </button>
+                            <button className="ghost-button small-button" type="button" onClick={() => void handleDeleteArena(arena)} disabled={submitting}>
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                        <span>Revision v{arena.latestRevision.version}</span>
+                      </article>
+                    )) : <p className="muted">{arenas.length > 0 ? "No arenas match the current filter." : "No arenas stored yet."}</p>}
+                  </div>
                 </section>
               </div>
             )}
@@ -735,6 +1313,7 @@ export function App() {
                         <span className="match-title">{match.name}</span>
                         <span className="match-meta">{match.participants.map((p) => p.botName).join(' vs ')}</span>
                         <span className="match-meta">{match.status} · {match.mode}</span>
+                        <OwnerLabel ownerEmail={match.ownerEmail ?? null} isAdmin={currentUser.role === "admin"} />
                       </button>
                     )) : <p className="muted">No matches stored yet.</p>}
                   </div>
@@ -794,6 +1373,7 @@ export function App() {
                           <div>
                             <h3>{ladder.name}</h3>
                             <p>{ladder.description || 'No description'}</p>
+                            <OwnerLabel ownerEmail={ladder.ownerEmail} isAdmin={currentUser.role === "admin"} />
                           </div>
                           <button className="ghost-button small-button" type="button" onClick={() => void handleLadderChallenge(ladder.id)} disabled={submitting || ladder.entries.length < 2}>
                             Challenge top pair
@@ -867,6 +1447,7 @@ export function App() {
                           <div>
                             <h3>{tournament.name}</h3>
                             <p>{tournament.description || 'No description'}</p>
+                            <OwnerLabel ownerEmail={tournament.ownerEmail} isAdmin={currentUser.role === "admin"} />
                           </div>
                           <div className="button-cluster">
                             <button className="ghost-button small-button" type="button" onClick={() => void handleRunTournament(tournament.id, { enqueue: false, limit: 1 })} disabled={submitting || tournament.summary.pendingMatches === 0}>Run next</button>
@@ -908,6 +1489,150 @@ export function App() {
                 </section>
               </div>
             )}
+
+            {activeTab === 'accounts' && (
+              <div>
+                <div className="page-header">
+                  <div>
+                    <div className="page-title">Accounts</div>
+                    <div className="page-sub">Session and user management</div>
+                  </div>
+                </div>
+                <StatRow chips={[
+                  { label: 'Signed in as', value: currentUser.email },
+                  { label: 'Role', value: currentUser.role },
+                  { label: 'Managed users', value: currentUser.role === 'admin' ? users.length : 1 },
+                ]} />
+                <section className="panel">
+                  <div className="panel-header">
+                    <div>
+                      <p className="eyebrow">Security</p>
+                      <h2>Change Password</h2>
+                    </div>
+                  </div>
+                  <div className="form-grid two-up">
+                    <label>
+                      <span>Current password</span>
+                      <input
+                        type="password"
+                        value={passwordForm.currentPassword}
+                        onChange={(event) => setPasswordForm((current) => ({ ...current, currentPassword: event.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      <span>New password</span>
+                      <input
+                        type="password"
+                        value={passwordForm.nextPassword}
+                        onChange={(event) => setPasswordForm((current) => ({ ...current, nextPassword: event.target.value }))}
+                      />
+                    </label>
+                  </div>
+                  <button className="primary-button" type="button" onClick={() => void handleChangePassword()} disabled={submitting}>
+                    Update password
+                  </button>
+                </section>
+
+                {currentUser.role === 'admin' ? (
+                  <section className="panel" data-testid="admin-users-panel">
+                    <div className="panel-header">
+                      <div>
+                        <p className="eyebrow">Administration</p>
+                        <h2>{editingUserId ? 'Edit Account' : 'Create Account'}</h2>
+                      </div>
+                      {editingUserId ? (
+                        <button className="ghost-button small-button" type="button" onClick={resetUserEditor} disabled={submitting}>
+                          Cancel edit
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="form-grid two-up">
+                      <label>
+                        <span>Email</span>
+                        <input value={userForm.email} onChange={(event) => setUserForm((current) => ({ ...current, email: event.target.value }))} />
+                      </label>
+                      <label>
+                        <span>Password {editingUserId ? '(leave blank to keep current)' : ''}</span>
+                        <input
+                          type="password"
+                          value={userForm.password}
+                          onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))}
+                        />
+                      </label>
+                    </div>
+                    <div className="form-grid two-up">
+                      <label>
+                        <span>Role</span>
+                        <select value={userForm.role} onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value as UserRole }))}>
+                          <option value="user">User</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </label>
+                      <label className="checkbox-row">
+                        <span>Active</span>
+                        <input
+                          type="checkbox"
+                          checked={userForm.isActive}
+                          onChange={(event) => setUserForm((current) => ({ ...current, isActive: event.target.checked }))}
+                        />
+                      </label>
+                    </div>
+                    {editingUserId ? (
+                      <div className="form-grid two-up">
+                        <label>
+                          <span>Transfer owned resources to</span>
+                          <select value={transferTargetUserId} onChange={(event) => setTransferTargetUserId(event.target.value)}>
+                            <option value="">Select destination user</option>
+                            {users
+                              .filter((user) => user.id !== editingUserId)
+                              .map((user) => <option key={user.id} value={user.id}>{user.email}</option>)}
+                          </select>
+                        </label>
+                        <div className="button-cluster">
+                          <button className="ghost-button" type="button" onClick={() => void handleTransferOwnership()} disabled={submitting || !transferTargetUserId}>
+                            Transfer ownership
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    <button className="primary-button" type="button" onClick={() => void handleSaveUser()} disabled={submitting}>
+                      {editingUserId ? 'Save account' : 'Create account'}
+                    </button>
+                    <div className="scroll-list compact-list">
+                      {users.map((user) => (
+                        <article key={user.id} className="list-card">
+                          <div className="card-toolbar">
+                            <div>
+                              <h3>{user.email}</h3>
+                              <p>{user.role} · {user.isActive ? 'active' : 'inactive'}</p>
+                              {(() => {
+                                const counts = ownershipCounts.get(user.id) ?? { bots: 0, arenas: 0, ladders: 0, tournaments: 0, matches: 0 };
+                                return (
+                                  <p className="match-meta">
+                                    {counts.bots} bots · {counts.arenas} arenas · {counts.ladders} ladders · {counts.tournaments} tournaments · {counts.matches} matches
+                                  </p>
+                                );
+                              })()}
+                            </div>
+                            <button className="ghost-button small-button" type="button" onClick={() => startEditingUser(user)} disabled={submitting}>
+                              Edit
+                            </button>
+                            <button
+                              className="ghost-button small-button"
+                              type="button"
+                              onClick={() => void handleDeleteUser(user)}
+                              disabled={submitting || user.id === currentUser.id}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+              </div>
+            )}
           </div>
         </main>
 
@@ -925,6 +1650,9 @@ export function App() {
             </button>
             <button className={`bottom-nav-item${activeTab === 'compete' ? ' active' : ''}`} onClick={() => setActiveTab('compete')}>
               <span className="nav-icon">⚔</span>Compete
+            </button>
+            <button className={`bottom-nav-item${activeTab === 'accounts' ? ' active' : ''}`} onClick={() => setActiveTab('accounts')}>
+              <span className="nav-icon">👤</span>Accounts
             </button>
           </div>
         </nav>
