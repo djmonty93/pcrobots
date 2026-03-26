@@ -489,8 +489,8 @@ export function createLadder(input: {
 export function challengeLadder(
   ladderId: string,
   input: { seed: number; enqueue: boolean; entryAId?: string; entryBId?: string }
-): Promise<{ match: MatchRecord; run: unknown }> {
-  return requestJson<{ match: MatchRecord; run: unknown }>(`/api/ladders/${ladderId}/challenge`, {
+): Promise<{ match: MatchRecord; run: MatchRunResponse }> {
+  return requestJson<{ match: MatchRecord; run: MatchRunResponse }>(`/api/ladders/${ladderId}/challenge`, {
     method: "POST",
     body: input
   });

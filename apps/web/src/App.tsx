@@ -375,7 +375,7 @@ export function App() {
       })
       .catch((err: unknown) => {
         const status = err instanceof Error && 'status' in err ? (err as { status: number }).status : 0;
-        if (status === 401) {
+        if (status >= 400 && status < 500) {
           clearAuthToken();
         } else {
           setError("Failed to restore session. Please reload or sign in again.");

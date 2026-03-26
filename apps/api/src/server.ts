@@ -58,6 +58,7 @@ const supportedRoles = ["admin", "user"] as const;
 const authRateLimitWindowMs = Number(process.env.PCROBOTS_AUTH_RATE_LIMIT_WINDOW_MS ?? 10 * 60 * 1000);
 const authRateLimitMaxAttempts = Number(process.env.PCROBOTS_AUTH_RATE_LIMIT_MAX_ATTEMPTS ?? 10);
 const corsOrigin = process.env.PCROBOTS_CORS_ORIGIN ?? "*";
+const trustProxy = process.env.PCROBOTS_TRUST_PROXY === "true";
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
 
 setInterval(() => {
@@ -370,12 +371,12 @@ function parseCreateBotInput(body: unknown): CreateBotInput {
     badRequest("source must not exceed 100,000 characters");
   }
 
-  return {
-    name: expectString(body.name, "name"),
-    description: typeof body.description === "string" ? body.description.trim() : "",
-    language: expectLanguage(body.language),
-    source
-  };
+  const name = expectString(body.name, "name");
+  if (name.length > 200) badRequest("name must not exceed 200 characters");
+  const description = typeof body.description === "string" ? body.description.trim() : "";
+  if (description.length > 2000) badRequest("description must not exceed 2000 characters");
+
+  return { name, description, language: expectLanguage(body.language), source };
 }
 
 function parseCreateArenaInput(body: unknown): CreateArenaInput {
@@ -388,11 +389,12 @@ function parseCreateArenaInput(body: unknown): CreateArenaInput {
     badRequest("text must not exceed 100,000 characters");
   }
 
-  return {
-    name: expectString(body.name, "name"),
-    description: typeof body.description === "string" ? body.description.trim() : "",
-    text
-  };
+  const name = expectString(body.name, "name");
+  if (name.length > 200) badRequest("name must not exceed 200 characters");
+  const description = typeof body.description === "string" ? body.description.trim() : "";
+  if (description.length > 2000) badRequest("description must not exceed 2000 characters");
+
+  return { name, description, text };
 }
 
 function parseCreateMatchRequest(body: unknown): { input: CreateMatchInput; enqueue: boolean } {
@@ -405,10 +407,13 @@ function parseCreateMatchRequest(body: unknown): { input: CreateMatchInput; enqu
     badRequest("participants must contain at least two entries");
   }
 
+  const matchName = expectString(body.name, "name");
+  if (matchName.length > 200) badRequest("name must not exceed 200 characters");
+
   return {
     enqueue: expectBoolean(body.enqueue, false),
     input: {
-      name: expectString(body.name, "name"),
+      name: matchName,
       mode: expectMode(body.mode),
       arenaId: typeof body.arenaId === "string" ? body.arenaId.trim() : undefined,
       arenaRevisionId: typeof body.arenaRevisionId === "string" ? body.arenaRevisionId.trim() : undefined,
@@ -445,10 +450,15 @@ function parseCreateLadderInput(body: unknown): CreateLadderInput {
     badRequest("A ladder requires at least two bots");
   }
 
+  const ladderName = expectString(body.name, "name");
+  if (ladderName.length > 200) badRequest("name must not exceed 200 characters");
+  const ladderDescription = typeof body.description === "string" ? body.description.trim() : "";
+  if (ladderDescription.length > 2000) badRequest("description must not exceed 2000 characters");
+
   return {
     ownerUserId: "",
-    name: expectString(body.name, "name"),
-    description: typeof body.description === "string" ? body.description.trim() : "",
+    name: ladderName,
+    description: ladderDescription,
     arenaId: typeof body.arenaId === "string" ? body.arenaId.trim() : undefined,
     arenaRevisionId: typeof body.arenaRevisionId === "string" ? body.arenaRevisionId.trim() : undefined,
     maxTicks: expectMaxTicks(body.maxTicks, 200),
@@ -466,10 +476,15 @@ function parseCreateTournamentInput(body: unknown): CreateTournamentInput {
     badRequest("A tournament requires at least two bots");
   }
 
+  const tournamentName = expectString(body.name, "name");
+  if (tournamentName.length > 200) badRequest("name must not exceed 200 characters");
+  const tournamentDescription = typeof body.description === "string" ? body.description.trim() : "";
+  if (tournamentDescription.length > 2000) badRequest("description must not exceed 2000 characters");
+
   return {
     ownerUserId: "",
-    name: expectString(body.name, "name"),
-    description: typeof body.description === "string" ? body.description.trim() : "",
+    name: tournamentName,
+    description: tournamentDescription,
     format: expectTournamentFormat(body.format),
     arenaId: typeof body.arenaId === "string" ? body.arenaId.trim() : undefined,
     arenaRevisionId: typeof body.arenaRevisionId === "string" ? body.arenaRevisionId.trim() : undefined,
@@ -591,6 +606,11 @@ function requireAdmin(user: UserRecord): void {
 }
 
 function getClientAddress(request: IncomingMessage): string {
+  if (trustProxy) {
+    const forwarded = request.headers["x-forwarded-for"];
+    const first = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(",")[0];
+    if (first?.trim()) return first.trim();
+  }
   return request.socket.remoteAddress ?? "unknown";
 }
 
@@ -745,7 +765,7 @@ async function runOrQueueMatch(match: MatchRecord, forceQueue: boolean): Promise
 
   return {
     statusCode: 200,
-    payload: (await executeStoredMatch(db, match.id)).match
+    payload: { queued: false, match: (await executeStoredMatch(db, match.id)).match }
   };
 }
 
@@ -932,7 +952,13 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       try {
         const updated = await db.updateUser(segments[2], input);
         if (input.password) {
-          await db.deleteSessionsForUser(segments[2]);
+          try {
+            await db.deleteSessionsForUser(segments[2]);
+          } catch (sessionError) {
+            console.error("failed to revoke sessions after admin password change", { userId: segments[2], error: sessionError });
+            sendError(response, 500, "Password updated but session revocation failed. Existing sessions may still be active.");
+            return;
+          }
         }
         sendJson(response, 200, updated);
       } catch (error) {
@@ -1371,10 +1397,19 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       return;
     }
 
-    console.error("unhandled request error", error);
+    console.error("unhandled request error", { method: request.method, path: request.url, error });
     sendError(response, 500, "Internal server error");
   }
 });
+
+if (isNaN(authRateLimitWindowMs) || authRateLimitWindowMs <= 0) {
+  console.error("invalid PCROBOTS_AUTH_RATE_LIMIT_WINDOW_MS", process.env.PCROBOTS_AUTH_RATE_LIMIT_WINDOW_MS);
+  process.exit(1);
+}
+if (isNaN(authRateLimitMaxAttempts) || authRateLimitMaxAttempts <= 0) {
+  console.error("invalid PCROBOTS_AUTH_RATE_LIMIT_MAX_ATTEMPTS", process.env.PCROBOTS_AUTH_RATE_LIMIT_MAX_ATTEMPTS);
+  process.exit(1);
+}
 
 const port = Number(process.env.PORT ?? 3001);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {

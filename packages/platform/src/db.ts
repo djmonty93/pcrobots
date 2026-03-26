@@ -337,9 +337,14 @@ function hashPassword(password: string): string {
   return `${salt}:${derived}`;
 }
 
+const MAX_PASSWORD_LENGTH = 1024;
+
 function validatePassword(password: string): void {
   if (password.length < MIN_PASSWORD_LENGTH) {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long`);
+  }
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    throw new Error(`Password must not exceed ${MAX_PASSWORD_LENGTH} characters`);
   }
 
   const hasLetter = /[A-Za-z]/.test(password);
@@ -352,6 +357,7 @@ function validatePassword(password: string): void {
 function verifyPassword(password: string, passwordHash: string): boolean {
   const [salt, expectedHex] = passwordHash.split(":");
   if (!salt || !expectedHex) {
+    console.error("verifyPassword: malformed password hash in database", { hashPrefix: passwordHash.slice(0, 8) });
     return false;
   }
 
@@ -524,7 +530,11 @@ export class Database {
     await this.pool.query(bootstrapSql);
     const admin = await this.ensureDefaultAdmin();
     await this.backfillLegacyOwnership(admin.id);
-    await this.pool.query(`DELETE FROM sessions WHERE expires_at <= NOW()`);
+    try {
+      await this.pool.query(`DELETE FROM sessions WHERE expires_at <= NOW()`);
+    } catch (err) {
+      console.warn("failed to clean up expired sessions during migrate — non-fatal", err);
+    }
   }
 
   async listUsers(): Promise<UserRecord[]> {
