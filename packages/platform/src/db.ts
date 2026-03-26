@@ -357,7 +357,7 @@ function validatePassword(password: string): void {
 function verifyPassword(password: string, passwordHash: string): boolean {
   const [salt, expectedHex] = passwordHash.split(":");
   if (!salt || !expectedHex) {
-    console.error("verifyPassword: malformed password hash in database", { hashPrefix: passwordHash.slice(0, 8) });
+    console.warn("verifyPassword: malformed password hash in database (expected salt:hex format)");
     return false;
   }
 
