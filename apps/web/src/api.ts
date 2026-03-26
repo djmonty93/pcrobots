@@ -1,4 +1,4 @@
-export type SupportedLanguage = "javascript" | "typescript" | "python";
+export type SupportedLanguage = "javascript" | "typescript" | "python" | "lua";
 export type MatchMode = "live" | "queued" | "ladder" | "round-robin" | "single-elimination" | "double-elimination";
 export type MatchStatus = "pending" | "queued" | "running" | "completed" | "failed";
 export type TournamentFormat = "round-robin" | "single-elimination" | "double-elimination";

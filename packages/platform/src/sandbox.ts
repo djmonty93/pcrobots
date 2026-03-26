@@ -62,6 +62,8 @@ export function buildSandboxDockerArgs(config: SandboxDockerConfig): string[] {
     "PCROBOTS_RUNNERS_DIR=/app/runners",
     "--env",
     "PCROBOTS_PYTHON_BIN=python",
+    "--env",
+    "PCROBOTS_LUA_BIN=lua5.4",
     config.image,
     "node",
     "/app/packages/platform/dist/platform/src/sandbox-runner.js"

@@ -1,6 +1,6 @@
 import type { RobotCommand, RobotTurnSnapshot } from "@pcrobots/engine";
 
-export type BotLanguage = "javascript" | "typescript" | "python";
+export type BotLanguage = "javascript" | "typescript" | "python" | "lua";
 
 export interface BotRevisionRef {
   botId: string;
@@ -45,5 +45,6 @@ export interface LoadedBot {
 }
 
 export * from "./javascript.js";
+export { loadLuaBot } from "./lua.js";
 export { loadPythonBot } from "./python.js";
 export * from "./runtime.js";

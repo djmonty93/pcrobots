@@ -1,10 +1,17 @@
 # Lua Runner
 
-The bot SDK exposes a `loadLuaBot(...)` entry point, but the local development environment does not yet include a Lua runtime.
+This directory contains the Lua bot runner used by the platform runtime.
 
-Planned shape:
+Runtime details:
 
-- a subprocess-based Lua runner script mirroring `runners/python/runner.py`
-- JSON snapshot via stdin
-- JSON action via stdout
-- execution inside the future containerized runner image
+- Lua version: `5.4`
+- JSON library: vendored `rxi/json.lua`
+- invocation shape: `lua runner.lua`
+- input: JSON payload on stdin with `source` and `snapshot`
+- output: one JSON action on stdout
+
+Lua bot sources may either:
+
+- `return function(snapshot) ... end`
+- define `on_turn(snapshot)`
+- define `onTurn(snapshot)`

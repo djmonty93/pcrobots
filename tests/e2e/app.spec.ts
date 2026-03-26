@@ -35,7 +35,7 @@ test("browser smoke covers registration, resource authoring, and live match flow
   await expect(page.getByText(`Saved ${alphaName}`)).toBeVisible();
 
   await botSection.getByLabel("Name").fill(betaName);
-  await botSection.getByLabel("Language").selectOption("python");
+  await botSection.getByLabel("Language").selectOption("lua");
   await botSection.getByRole("button", { name: /save/i }).click();
   await expect(page.getByText(`Saved ${betaName}`)).toBeVisible();
 
@@ -50,7 +50,7 @@ test("browser smoke covers registration, resource authoring, and live match flow
   await matchSection.getByLabel("Name").fill(liveMatchName);
   await matchSection.getByLabel("Arena").selectOption({ label: arenaName });
   await matchSection.getByLabel("Team A bot").selectOption({ label: `${alphaName} (javascript)` });
-  await matchSection.getByLabel("Team B bot").selectOption({ label: `${betaName} (python)` });
+  await matchSection.getByLabel("Team B bot").selectOption({ label: `${betaName} (lua)` });
   await matchSection.getByLabel("Seed").fill("21");
   await matchSection.getByLabel("Max ticks").fill("40");
   await matchSection.getByRole("button", { name: "Store and run now" }).click();

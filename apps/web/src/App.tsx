@@ -66,6 +66,16 @@ def on_turn(snapshot: dict[str, Any]):
     if snapshot["tick"] == 0:
         return {"kind": "scan", "heading": 0, "resolution": 10}
     return {"kind": "movement", "targetSpeed": 30, "heading": 0}
+`,
+  lua: `local function on_turn(snapshot)
+  if snapshot.tick == 0 then
+    return { kind = "scan", heading = 0, resolution = 10 }
+  end
+
+  return { kind = "movement", targetSpeed = 30, heading = 0 }
+end
+
+return on_turn
 `
 };
 
@@ -1072,6 +1082,7 @@ export function App() {
                             <option value="javascript">JavaScript</option>
                             <option value="typescript">TypeScript</option>
                             <option value="python">Python</option>
+                            <option value="lua">Lua</option>
                           </select>
                         </label>
                       </div>

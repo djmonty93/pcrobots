@@ -8,7 +8,7 @@ import {
   type MatchResult,
   type MatchState
 } from "@pcrobots/engine";
-import { loadJavaScriptBot, loadPythonBot, type LoadedBot } from "@pcrobots/bot-sdk";
+import { loadJavaScriptBot, loadLuaBot, loadPythonBot, type LoadedBot } from "@pcrobots/bot-sdk";
 
 import { type MatchParticipantRecord, type MatchRecord } from "./db.js";
 
@@ -30,22 +30,38 @@ function loadParticipantBot(participant: MatchParticipantRecord): LoadedBot {
         language: participant.language,
         source: participant.source
       });
+    case "lua":
+      return loadLuaBot(participant.id, {
+        language: participant.language,
+        source: participant.source
+      });
     default:
       throw new Error(`Unsupported bot language ${(participant as { language: string }).language}`);
   }
 }
 
 function getTurnTimeoutMs(participant: MatchParticipantRecord): number {
-  const configured = participant.language === "python"
-    ? process.env.PCROBOTS_PYTHON_TURN_TIMEOUT_MS
-    : process.env.PCROBOTS_SCRIPT_TURN_TIMEOUT_MS;
+  const configured =
+    participant.language === "python"
+      ? process.env.PCROBOTS_PYTHON_TURN_TIMEOUT_MS
+      : participant.language === "lua"
+        ? process.env.PCROBOTS_LUA_TURN_TIMEOUT_MS
+        : process.env.PCROBOTS_SCRIPT_TURN_TIMEOUT_MS;
   const parsed = configured ? Number(configured) : Number.NaN;
 
   if (Number.isFinite(parsed) && parsed > 0) {
     return parsed;
   }
 
-  return participant.language === "python" ? 500 : 100;
+  if (participant.language === "python") {
+    return 500;
+  }
+
+  if (participant.language === "lua") {
+    return 250;
+  }
+
+  return 100;
 }
 
 function isEliminationMode(match: MatchRecord): boolean {
