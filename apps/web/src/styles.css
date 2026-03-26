@@ -275,6 +275,12 @@ button, input, select {
   max-width: 1200px;
 }
 
+/* Login screen — single centered panel */
+.content-inner.login-frame {
+  max-width: 480px;
+  margin: 80px auto 0;
+}
+
 /* ── Bottom nav (mobile only) ── */
 .bottom-nav {
   display: none;

@@ -878,8 +878,9 @@ export function App() {
   if (!currentUser) {
     return (
       <div className="shell">
-        <main className="main">
-          <div className="content-frame">
+        <div className="content-wrap">
+          <main className="content">
+            <div className="content-inner login-frame">
             <section className="panel" data-testid="login-panel">
               <div className="panel-header">
                 <div>
@@ -887,8 +888,8 @@ export function App() {
                   <h2>Sign In</h2>
                 </div>
               </div>
-              {error ? <div className="error-banner">{error}</div> : null}
-              {message ? <div className="message-banner">{message}</div> : null}
+              {error ? <span className="message error">{error}</span> : null}
+              {message ? <span className="message success">{message}</span> : null}
               <div className="form-grid two-up">
                 <label>
                   <span>Email</span>
@@ -915,8 +916,9 @@ export function App() {
                 </button>
               </div>
             </section>
-          </div>
-        </main>
+            </div>
+          </main>
+        </div>
       </div>
     );
   }
