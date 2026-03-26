@@ -132,8 +132,8 @@ function createInitialTournamentState() {
 
 function createInitialLoginState() {
   return {
-    email: "admin@pcrobots.local",
-    password: "change-me-admin-password"
+    email: "",
+    password: ""
   };
 }
 
@@ -226,12 +226,9 @@ function getTournamentStatusLine(tournament: TournamentRecord): string {
   return "No leader yet";
 }
 
-function formatOwnerLabel(ownerEmail: string | null, isAdmin: boolean): string | null {
-  if (!isAdmin) {
-    return null;
-  }
-
-  return ownerEmail ? `Owner: ${ownerEmail}` : "Owner: unknown";
+function OwnerLabel({ ownerEmail, isAdmin }: { ownerEmail: string | null; isAdmin: boolean }) {
+  if (!isAdmin) return null;
+  return <p className="match-meta">{ownerEmail ? `Owner: ${ownerEmail}` : "Owner: unknown"}</p>;
 }
 
 type Tab = "bots" | "arenas" | "matches" | "compete" | "accounts";
@@ -890,31 +887,34 @@ export function App() {
               </div>
               {error ? <span className="message error">{error}</span> : null}
               {message ? <span className="message success">{message}</span> : null}
-              <div className="form-grid two-up">
-                <label>
-                  <span>Email</span>
-                  <input
-                    value={loginForm.email}
-                    onChange={(event) => setLoginForm((current) => ({ ...current, email: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  <span>Password</span>
-                  <input
-                    type="password"
-                    value={loginForm.password}
-                    onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))}
-                  />
-                </label>
-              </div>
-              <div className="button-cluster">
-                <button className="primary-button" type="button" onClick={() => void handleLogin()} disabled={submitting || loading}>
-                  {loading ? "Checking session..." : "Sign in"}
-                </button>
-                <button className="ghost-button" type="button" onClick={() => void handleRegister()} disabled={submitting || loading}>
-                  Create user account
-                </button>
-              </div>
+              <form onSubmit={(e) => { e.preventDefault(); void handleLogin(); }}>
+                <div className="form-grid two-up">
+                  <label>
+                    <span>Email</span>
+                    <input
+                      type="email"
+                      value={loginForm.email}
+                      onChange={(event) => setLoginForm((current) => ({ ...current, email: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    <span>Password</span>
+                    <input
+                      type="password"
+                      value={loginForm.password}
+                      onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))}
+                    />
+                  </label>
+                </div>
+                <div className="button-cluster">
+                  <button className="primary-button" type="submit" disabled={submitting || loading}>
+                    {loading ? "Checking session..." : "Sign in"}
+                  </button>
+                  <button className="ghost-button" type="button" onClick={() => void handleRegister()} disabled={submitting || loading}>
+                    Create user account
+                  </button>
+                </div>
+              </form>
             </section>
             </div>
           </main>
@@ -1104,9 +1104,7 @@ export function App() {
                               <div>
                               <h3>{bot.name}</h3>
                               <p>{bot.description || 'No description'}</p>
-                              {formatOwnerLabel(bot.ownerEmail, currentUser.role === "admin") ? (
-                                <p className="match-meta">{formatOwnerLabel(bot.ownerEmail, currentUser.role === "admin")}</p>
-                              ) : null}
+                              <OwnerLabel ownerEmail={bot.ownerEmail} isAdmin={currentUser.role === "admin"} />
                             </div>
                               <div className="button-cluster">
                                 <button className="ghost-button small-button" type="button" onClick={() => duplicateBot(bot)} disabled={submitting}>
@@ -1197,9 +1195,7 @@ export function App() {
                           <div>
                             <h3>{arena.name}</h3>
                             <p>{arena.description || 'No description'}</p>
-                            {formatOwnerLabel(arena.ownerEmail, currentUser.role === "admin") ? (
-                              <p className="match-meta">{formatOwnerLabel(arena.ownerEmail, currentUser.role === "admin")}</p>
-                            ) : null}
+                            <OwnerLabel ownerEmail={arena.ownerEmail} isAdmin={currentUser.role === "admin"} />
                           </div>
                           <div className="button-cluster">
                             <button className="ghost-button small-button" type="button" onClick={() => duplicateArena(arena)} disabled={submitting}>
@@ -1317,9 +1313,7 @@ export function App() {
                         <span className="match-title">{match.name}</span>
                         <span className="match-meta">{match.participants.map((p) => p.botName).join(' vs ')}</span>
                         <span className="match-meta">{match.status} · {match.mode}</span>
-                        {formatOwnerLabel(match.ownerEmail ?? null, currentUser.role === "admin") ? (
-                          <span className="match-meta">{formatOwnerLabel(match.ownerEmail ?? null, currentUser.role === "admin")}</span>
-                        ) : null}
+                        <OwnerLabel ownerEmail={match.ownerEmail ?? null} isAdmin={currentUser.role === "admin"} />
                       </button>
                     )) : <p className="muted">No matches stored yet.</p>}
                   </div>
@@ -1379,9 +1373,7 @@ export function App() {
                           <div>
                             <h3>{ladder.name}</h3>
                             <p>{ladder.description || 'No description'}</p>
-                            {formatOwnerLabel(ladder.ownerEmail, currentUser.role === "admin") ? (
-                              <p className="match-meta">{formatOwnerLabel(ladder.ownerEmail, currentUser.role === "admin")}</p>
-                            ) : null}
+                            <OwnerLabel ownerEmail={ladder.ownerEmail} isAdmin={currentUser.role === "admin"} />
                           </div>
                           <button className="ghost-button small-button" type="button" onClick={() => void handleLadderChallenge(ladder.id)} disabled={submitting || ladder.entries.length < 2}>
                             Challenge top pair
@@ -1455,9 +1447,7 @@ export function App() {
                           <div>
                             <h3>{tournament.name}</h3>
                             <p>{tournament.description || 'No description'}</p>
-                            {formatOwnerLabel(tournament.ownerEmail, currentUser.role === "admin") ? (
-                              <p className="match-meta">{formatOwnerLabel(tournament.ownerEmail, currentUser.role === "admin")}</p>
-                            ) : null}
+                            <OwnerLabel ownerEmail={tournament.ownerEmail} isAdmin={currentUser.role === "admin"} />
                           </div>
                           <div className="button-cluster">
                             <button className="ghost-button small-button" type="button" onClick={() => void handleRunTournament(tournament.id, { enqueue: false, limit: 1 })} disabled={submitting || tournament.summary.pendingMatches === 0}>Run next</button>
