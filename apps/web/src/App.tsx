@@ -76,8 +76,31 @@ def on_turn(snapshot: dict[str, Any]):
 end
 
 return on_turn
-`
+`,
+  "linux-x64-binary": ""
 };
+
+type BotFormState = {
+  name: string;
+  description: string;
+  language: SupportedLanguage;
+  source: string;
+  artifactBase64: string;
+  artifactFileName: string;
+  preserveExistingArtifact: boolean;
+};
+
+function isBinaryLanguage(language: SupportedLanguage): language is "linux-x64-binary" {
+  return language === "linux-x64-binary";
+}
+
+function encodeBytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
 
 function createSampleArenaText(): string {
   const lines = Array.from({ length: 100 }, () => ".".repeat(100));
@@ -93,8 +116,11 @@ function createInitialBotState() {
     name: "Scout Alpha",
     description: "First browser-authored bot",
     language: "javascript" as SupportedLanguage,
-    source: defaultBotTemplates.javascript
-  };
+    source: defaultBotTemplates.javascript,
+    artifactBase64: "",
+    artifactFileName: "",
+    preserveExistingArtifact: false
+  } satisfies BotFormState;
 }
 
 function createInitialArenaState() {
@@ -269,7 +295,7 @@ export function App() {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [botForm, setBotForm] = useState(createInitialBotState);
+  const [botForm, setBotForm] = useState<BotFormState>(createInitialBotState);
   const [editingBotId, setEditingBotId] = useState<string | null>(null);
   const [botFilter, setBotFilter] = useState("");
   const [arenaForm, setArenaForm] = useState(createInitialArenaState);
@@ -492,7 +518,10 @@ export function App() {
       name: bot.name,
       description: bot.description,
       language: bot.latestRevision.language,
-      source: bot.latestRevision.source
+      source: bot.latestRevision.source,
+      artifactBase64: "",
+      artifactFileName: bot.latestRevision.artifactFileName ?? "",
+      preserveExistingArtifact: bot.latestRevision.language === "linux-x64-binary"
     });
   }
 
@@ -512,9 +541,16 @@ export function App() {
       name: `Copy of ${bot.name}`,
       description: bot.description,
       language: bot.latestRevision.language,
-      source: bot.latestRevision.source
+      source: bot.latestRevision.source,
+      artifactBase64: "",
+      artifactFileName: "",
+      preserveExistingArtifact: false
     });
-    setMessage(`Loaded ${bot.name} into the editor as a new bot copy`);
+    setMessage(
+      bot.latestRevision.language === "linux-x64-binary"
+        ? `Loaded ${bot.name} metadata into the editor. Upload a Linux binary to save the copy.`
+        : `Loaded ${bot.name} into the editor as a new bot copy`
+    );
     setError(null);
   }
 
@@ -698,7 +734,22 @@ export function App() {
     setError(null);
 
     try {
-      const bot = editingBotId ? await updateBot(editingBotId, botForm) : await createBot(botForm);
+      const payload = isBinaryLanguage(botForm.language)
+        ? {
+            name: botForm.name,
+            description: botForm.description,
+            language: botForm.language,
+            artifactBase64: botForm.artifactBase64 || undefined,
+            artifactFileName: botForm.artifactFileName || undefined,
+            preserveExistingArtifact: editingBotId ? botForm.preserveExistingArtifact && !botForm.artifactBase64 : undefined
+          }
+        : {
+            name: botForm.name,
+            description: botForm.description,
+            language: botForm.language,
+            source: botForm.source
+          };
+      const bot = editingBotId ? await updateBot(editingBotId, payload) : await createBot(payload as Parameters<typeof createBot>[0]);
       setMessage(editingBotId ? `Updated ${bot.name}` : `Saved ${bot.name}`);
       resetBotEditor();
       await refreshData();
@@ -706,6 +757,27 @@ export function App() {
       setError(createError instanceof Error ? createError.message : String(createError));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleBotArtifactSelected(file: File | null): Promise<void> {
+    if (!file) {
+      setBotForm((current) => ({ ...current, artifactBase64: "", artifactFileName: "", preserveExistingArtifact: Boolean(editingBotId) }));
+      return;
+    }
+
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      setBotForm((current) => ({
+        ...current,
+        artifactBase64: encodeBytesToBase64(bytes),
+        artifactFileName: file.name,
+        preserveExistingArtifact: false
+      }));
+      setMessage(`Loaded ${file.name} for upload`);
+      setError(null);
+    } catch (artifactError) {
+      setError(artifactError instanceof Error ? artifactError.message : String(artifactError));
     }
   }
 
@@ -1060,6 +1132,7 @@ export function App() {
                             className="ghost-button"
                             type="button"
                             onClick={() => setBotForm((current) => ({ ...current, source: defaultBotTemplates[current.language] }))}
+                            disabled={isBinaryLanguage(botForm.language)}
                           >
                             Load template
                           </button>
@@ -1076,13 +1149,21 @@ export function App() {
                             value={botForm.language}
                             onChange={(event) => {
                               const language = event.target.value as SupportedLanguage;
-                              setBotForm((current) => ({ ...current, language, source: defaultBotTemplates[language] }));
+                              setBotForm((current) => ({
+                                ...current,
+                                language,
+                                source: defaultBotTemplates[language],
+                                artifactBase64: "",
+                                artifactFileName: "",
+                                preserveExistingArtifact: false
+                              }));
                             }}
                           >
                             <option value="javascript">JavaScript</option>
                             <option value="typescript">TypeScript</option>
                             <option value="python">Python</option>
                             <option value="lua">Lua</option>
+                            <option value="linux-x64-binary">Linux x64 binary</option>
                           </select>
                         </label>
                       </div>
@@ -1090,7 +1171,27 @@ export function App() {
                         <span>Description</span>
                         <input value={botForm.description} onChange={(event) => setBotForm((current) => ({ ...current, description: event.target.value }))} />
                       </label>
-                      <CodeEditor language={botForm.language} value={botForm.source} height={300} onChange={(value) => setBotForm((current) => ({ ...current, source: value }))} />
+                      {isBinaryLanguage(botForm.language) ? (
+                        <div className="panel inset-panel">
+                          <label>
+                            <span>Linux x64 executable</span>
+                            <input
+                              type="file"
+                              accept=".bin,.out,.elf,.exe,application/octet-stream"
+                              onChange={(event) => void handleBotArtifactSelected(event.target.files?.[0] ?? null)}
+                            />
+                          </label>
+                          <p className="match-meta">
+                            {botForm.artifactFileName
+                              ? `Selected artifact: ${botForm.artifactFileName}`
+                              : botForm.preserveExistingArtifact
+                                ? "Keeping the existing uploaded binary for this bot."
+                                : "Upload a Linux x64 ELF executable that reads a snapshot JSON from stdin and writes a JSON action to stdout."}
+                          </p>
+                        </div>
+                      ) : (
+                        <CodeEditor language={botForm.language} value={botForm.source} height={300} onChange={(value) => setBotForm((current) => ({ ...current, source: value }))} />
+                      )}
                       <button className="primary-button" type="button" onClick={() => void handleSaveBot()} disabled={submitting}>
                         {editingBotId ? "Save bot changes" : "Save bot revision"}
                       </button>
@@ -1134,7 +1235,10 @@ export function App() {
                                 </button>
                               </div>
                             </div>
-                            <span>{bot.latestRevision.language} · v{bot.latestRevision.version}</span>
+                            <span>
+                              {bot.latestRevision.language} · v{bot.latestRevision.version}
+                              {bot.latestRevision.artifactFileName ? ` · ${bot.latestRevision.artifactFileName}` : ""}
+                            </span>
                           </article>
                         )) : <p className="muted">{bots.length > 0 ? "No bots match the current filter." : "No bots stored yet."}</p>}
                       </div>

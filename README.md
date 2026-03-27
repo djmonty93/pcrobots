@@ -6,7 +6,7 @@ This repository is a modern web rebuild of the original DOS PCRobots game in [`o
 
 - faithful deterministic simulation core in TypeScript
 - web UI with bot editing, arena editing, replay playback, ladders, and tournaments
-- interpreted bot languages first: JavaScript, TypeScript, Python, Lua 5.4
+- interpreted bot languages plus uploaded Linux x64 bot binaries: JavaScript, TypeScript, Python, Lua 5.4, and Linux-native executables
 - API + worker + Postgres + Redis backend
 - local deployment with Docker Compose
 
@@ -102,6 +102,8 @@ npm run local:smoke
 
 The smoke script waits for the API, creates JavaScript, Lua, and Python bots plus an arena, proves synchronous API-side sandbox execution with a mixed-language live match, then creates a single-elimination tournament, enqueues it through the API, and polls until the worker finishes the tournament through the queued sandbox path.
 
+Uploaded Linux x64 bot binaries are also supported through the main bot registry. Those bots are stored as immutable revision artifacts and executed inside the same isolated sandbox model as the interpreted runtimes.
+
 The current smoke flow also verifies:
 
 - admin login
@@ -114,5 +116,6 @@ The current smoke flow also verifies:
 
 - per-match execution now runs inside short-lived Docker runner containers with no network, read-only rootfs, dropped capabilities, no-new-privileges, pid limits, CPU limits, memory limits, and tmpfs-only scratch space
 - Lua now runs through the same isolated interpreted-bot path as Python, using Lua 5.4 plus vendored `rxi/json.lua`
+- uploaded Linux x64 bot binaries now run through the same isolated per-match sandbox path using the stdin/stdout JSON turn contract
 - the Monaco bundle is still large and needs chunking/performance work
 

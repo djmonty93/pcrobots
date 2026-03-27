@@ -15,6 +15,10 @@ function createParticipant(seed: number, teamId: "A" | "B", slot: number): Match
     botName: `Bot ${seed}`,
     language: "javascript",
     source: "module.exports = () => ({ kind: 'noop' });",
+    artifactBase64: null,
+    artifactFileName: null,
+    artifactSha256: null,
+    artifactSizeBytes: null,
     revisionVersion: 1,
     teamId,
     slot

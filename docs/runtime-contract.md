@@ -1,6 +1,6 @@
 # Bot Runtime Contract
 
-This document defines the host-to-bot contract for interpreted languages in v1.
+This document defines the host-to-bot contract for interpreted languages and uploaded Linux-native binaries in v1.
 
 ## Supported Languages In V1
 
@@ -8,8 +8,9 @@ This document defines the host-to-bot contract for interpreted languages in v1.
 - TypeScript
 - Python
 - Lua
+- Linux x64 binary
 
-TypeScript is transpiled to JavaScript before execution. Python and Lua run in subprocess-based language runners inside the per-match sandbox container.
+TypeScript is transpiled to JavaScript before execution. Python and Lua run in subprocess-based language runners inside the per-match sandbox container. Linux x64 binaries are uploaded as immutable bot revision artifacts and executed directly inside that same sandbox.
 
 ## Host Model
 
@@ -23,6 +24,8 @@ Each match runs inside a short-lived sandbox container that loads the language r
 2. receive per-turn state snapshots
 3. respond with one action
 4. terminate cleanly at match end
+
+For uploaded Linux x64 binaries, the executable itself is the bot process. It reads a turn snapshot JSON from stdin and writes one JSON action to stdout.
 
 ## Proposed JSON Messages
 

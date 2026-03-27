@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   createMatchState,
@@ -31,6 +32,7 @@ import {
   type LadderRecord,
   type MatchRecord,
   type SupportedLanguage,
+  type UpdateBotInput,
   type UpdateUserInput,
   type UserRecord,
   type UserRole,
@@ -50,7 +52,7 @@ await retry(async () => {
   await matchQueue.waitUntilReady();
 }, { label: "api bootstrap" });
 
-const supportedLanguages = ["javascript", "typescript", "python", "lua"] as const;
+const supportedLanguages = ["javascript", "typescript", "python", "lua", "linux-x64-binary"] as const;
 const supportedModes = ["live", "queued", "ladder", "round-robin", "single-elimination", "double-elimination"] as const;
 const supportedTournamentFormats = ["round-robin", "single-elimination", "double-elimination"] as const;
 const supportedTeams = ["A", "B", "C"] as const;
@@ -60,6 +62,7 @@ const authRateLimitMaxAttempts = Number(process.env.PCROBOTS_AUTH_RATE_LIMIT_MAX
 const corsOrigin = process.env.PCROBOTS_CORS_ORIGIN ?? "*";
 const trustProxy = process.env.PCROBOTS_TRUST_PROXY === "true";
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
+const maxBotArtifactBytes = Number(process.env.PCROBOTS_MAX_BOT_ARTIFACT_BYTES ?? 2 * 1024 * 1024);
 
 setInterval(() => {
   const now = Date.now();
@@ -244,14 +247,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let totalBytes = 0;
-  const maxBytes = 1024 * 1024; // 1 MB
+  const maxBytes = 8 * 1024 * 1024;
 
   try {
     for await (const chunk of request) {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       totalBytes += buf.length;
       if (totalBytes > maxBytes) {
-        throw new HttpError(413, "Request body too large (limit: 1 MB)");
+        throw new HttpError(413, "Request body too large (limit: 8 MB)");
       }
       chunks.push(buf);
     }
@@ -364,9 +367,106 @@ function expectMaxTicks(value: unknown, fallback?: number): number {
   return ticks;
 }
 
+function sha256Hex(value: Buffer): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function decodeBotArtifact(value: unknown): { artifactBase64: string; artifactBytes: Buffer } {
+  const artifactBase64 = expectString(value, "artifactBase64");
+  let artifactBytes: Buffer;
+  try {
+    artifactBytes = Buffer.from(artifactBase64, "base64");
+  } catch (error) {
+    badRequest("artifactBase64 must be valid base64", error instanceof Error ? error.message : String(error));
+  }
+
+  if (artifactBytes.length === 0 || artifactBytes.toString("base64") !== artifactBase64.replace(/\s+/g, "")) {
+    badRequest("artifactBase64 must be valid base64");
+  }
+
+  if (artifactBytes.length > maxBotArtifactBytes) {
+    badRequest(`artifact must not exceed ${maxBotArtifactBytes} bytes`);
+  }
+
+  return { artifactBase64, artifactBytes };
+}
+
+function validateLinuxX64Elf(artifactBytes: Buffer): void {
+  if (artifactBytes.length < 64) {
+    badRequest("linux-x64-binary artifact is too small to be a valid ELF executable");
+  }
+
+  if (
+    artifactBytes[0] !== 0x7f ||
+    artifactBytes[1] !== 0x45 ||
+    artifactBytes[2] !== 0x4c ||
+    artifactBytes[3] !== 0x46
+  ) {
+    badRequest("linux-x64-binary artifact must be an ELF executable");
+  }
+
+  if (artifactBytes[4] !== 2) {
+    badRequest("linux-x64-binary artifact must be a 64-bit ELF executable");
+  }
+
+  if (artifactBytes[5] !== 1) {
+    badRequest("linux-x64-binary artifact must use little-endian ELF encoding");
+  }
+
+  const machine = artifactBytes.readUInt16LE(18);
+  if (machine !== 0x3e) {
+    badRequest("linux-x64-binary artifact must target x86_64");
+  }
+}
+
+function parseBinaryBotFields(body: Record<string, unknown>, artifactRequired: boolean) {
+  const artifactValue = body.artifactBase64;
+  if ((artifactValue === undefined || artifactValue === null || artifactValue === "") && !artifactRequired) {
+    return null;
+  }
+
+  const { artifactBase64, artifactBytes } = decodeBotArtifact(artifactValue);
+  validateLinuxX64Elf(artifactBytes);
+
+  const artifactFileName = expectString(body.artifactFileName, "artifactFileName");
+  if (artifactFileName.length > 255) {
+    badRequest("artifactFileName must not exceed 255 characters");
+  }
+
+  return {
+    artifactBase64,
+    artifactFileName,
+    artifactSha256: sha256Hex(artifactBytes),
+    artifactSizeBytes: artifactBytes.length
+  };
+}
+
 function parseCreateBotInput(body: unknown): CreateBotInput {
   if (!isRecord(body)) {
     badRequest("bot payload must be a JSON object");
+  }
+
+  const name = expectString(body.name, "name");
+  if (name.length > 200) badRequest("name must not exceed 200 characters");
+  const description = typeof body.description === "string" ? body.description.trim() : "";
+  if (description.length > 2000) badRequest("description must not exceed 2000 characters");
+  const language = expectLanguage(body.language);
+
+  if (language === "linux-x64-binary") {
+    const artifact = parseBinaryBotFields(body, true);
+    if (!artifact) {
+      badRequest("artifactBase64 is required for linux-x64-binary bots");
+    }
+
+    return {
+      name,
+      description,
+      language,
+      artifactBase64: artifact.artifactBase64,
+      artifactFileName: artifact.artifactFileName,
+      artifactSha256: artifact.artifactSha256,
+      artifactSizeBytes: artifact.artifactSizeBytes
+    };
   }
 
   const source = expectString(body.source, "source");
@@ -374,12 +474,40 @@ function parseCreateBotInput(body: unknown): CreateBotInput {
     badRequest("source must not exceed 100,000 characters");
   }
 
+  return { name, description, language, source };
+}
+
+function parseUpdateBotInput(body: unknown, existingLanguage: SupportedLanguage): UpdateBotInput {
+  if (!isRecord(body)) {
+    badRequest("bot payload must be a JSON object");
+  }
+
   const name = expectString(body.name, "name");
   if (name.length > 200) badRequest("name must not exceed 200 characters");
   const description = typeof body.description === "string" ? body.description.trim() : "";
   if (description.length > 2000) badRequest("description must not exceed 2000 characters");
+  const language = expectLanguage(body.language);
 
-  return { name, description, language: expectLanguage(body.language), source };
+  if (language === "linux-x64-binary") {
+    const artifact = parseBinaryBotFields(body, false);
+    return {
+      name,
+      description,
+      language,
+      artifactBase64: artifact?.artifactBase64,
+      artifactFileName: artifact?.artifactFileName,
+      artifactSha256: artifact?.artifactSha256,
+      artifactSizeBytes: artifact?.artifactSizeBytes,
+      preserveExistingArtifact: !artifact && existingLanguage === "linux-x64-binary"
+    };
+  }
+
+  const source = expectString(body.source, "source");
+  if (source.length > 100_000) {
+    badRequest("source must not exceed 100,000 characters");
+  }
+
+  return { name, description, language, source };
 }
 
 function parseCreateArenaInput(body: unknown): CreateArenaInput {
@@ -1073,7 +1201,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       }
 
       const body = await readJsonBody(request);
-      const input = parseCreateBotInput(body);
+      const input = parseUpdateBotInput(body, existingBot.latestRevision.language);
       sendJson(response, 200, await db.updateBot(segments[2], input));
       return;
     }
@@ -1411,6 +1539,10 @@ if (isNaN(authRateLimitWindowMs) || authRateLimitWindowMs <= 0) {
 }
 if (isNaN(authRateLimitMaxAttempts) || authRateLimitMaxAttempts <= 0) {
   console.error("invalid PCROBOTS_AUTH_RATE_LIMIT_MAX_ATTEMPTS", process.env.PCROBOTS_AUTH_RATE_LIMIT_MAX_ATTEMPTS);
+  process.exit(1);
+}
+if (isNaN(maxBotArtifactBytes) || maxBotArtifactBytes <= 0) {
+  console.error("invalid PCROBOTS_MAX_BOT_ARTIFACT_BYTES", process.env.PCROBOTS_MAX_BOT_ARTIFACT_BYTES);
   process.exit(1);
 }
 

@@ -3,7 +3,7 @@ import { Pool, type PoolClient } from "pg";
 
 import { bootstrapSql } from "./schema.js";
 
-export type SupportedLanguage = "javascript" | "typescript" | "python" | "lua";
+export type SupportedLanguage = "javascript" | "typescript" | "python" | "lua" | "linux-x64-binary";
 export type TeamId = "A" | "B" | "C";
 export type UserRole = "admin" | "user";
 export type MatchMode =
@@ -55,6 +55,9 @@ export interface BotRevisionRecord {
   botId: string;
   language: SupportedLanguage;
   source: string;
+  artifactFileName: string | null;
+  artifactSha256: string | null;
+  artifactSizeBytes: number | null;
   version: number;
   createdAt: string;
 }
@@ -97,6 +100,10 @@ export interface MatchParticipantRecord {
   botName: string;
   language: SupportedLanguage;
   source: string;
+  artifactBase64: string | null;
+  artifactFileName: string | null;
+  artifactSha256: string | null;
+  artifactSizeBytes: number | null;
   revisionVersion: number;
   teamId: TeamId;
   slot: number;
@@ -137,12 +144,40 @@ export interface ArenaRevisionLookupRecord extends ArenaRevisionRecord {
   ownerEmail: string | null;
 }
 
-export interface CreateBotInput {
+interface BaseBotInput {
   name: string;
   description?: string;
-  language: SupportedLanguage;
+}
+
+export interface SourceBotInput extends BaseBotInput {
+  language: Exclude<SupportedLanguage, "linux-x64-binary">;
   source: string;
 }
+
+export interface LinuxBinaryBotInput extends BaseBotInput {
+  language: "linux-x64-binary";
+  artifactBase64: string;
+  artifactFileName: string;
+  artifactSha256: string;
+  artifactSizeBytes: number;
+}
+
+export interface UpdateBinaryBotInput extends BaseBotInput {
+  language: "linux-x64-binary";
+  artifactBase64?: string;
+  artifactFileName?: string;
+  artifactSha256?: string;
+  artifactSizeBytes?: number;
+  preserveExistingArtifact?: boolean;
+}
+
+export type CreateBotInput =
+  | SourceBotInput
+  | LinuxBinaryBotInput;
+
+export type UpdateBotInput =
+  | SourceBotInput
+  | UpdateBinaryBotInput;
 
 export interface CreateArenaInput {
   name: string;
@@ -221,6 +256,9 @@ type BotRow = {
   revision_id: string;
   revision_language: SupportedLanguage;
   revision_source: string;
+  revision_artifact_filename: string | null;
+  revision_artifact_sha256: string | null;
+  revision_artifact_size_bytes: number | null;
   revision_version: number;
   revision_created_at: TimestampValue;
 };
@@ -271,6 +309,10 @@ type MatchParticipantRow = {
   bot_name: string;
   language: SupportedLanguage;
   source: string;
+  artifact_base64: string | null;
+  artifact_filename: string | null;
+  artifact_sha256: string | null;
+  artifact_size_bytes: number | null;
   revision_version: number;
   team_id: TeamId;
   slot: number;
@@ -281,6 +323,9 @@ type BotRevisionLookupRow = {
   bot_id: string;
   language: SupportedLanguage;
   source: string;
+  artifact_filename: string | null;
+  artifact_sha256: string | null;
+  artifact_size_bytes: number | null;
   version: number;
   created_at: TimestampValue;
   owner_user_id: string | null;
@@ -296,6 +341,7 @@ type ArenaRevisionLookupRow = {
   owner_user_id: string | null;
   owner_email: string | null;
 };
+
 
 function toIso(value: TimestampValue): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
@@ -325,6 +371,14 @@ function toJsonParameter(value: unknown): string | null {
   }
 
   return JSON.stringify(value);
+}
+
+function isBinaryLanguage(language: SupportedLanguage): language is "linux-x64-binary" {
+  return language === "linux-x64-binary";
+}
+
+function hasBinaryArtifact(input: CreateBotInput | UpdateBotInput): input is LinuxBinaryBotInput | UpdateBinaryBotInput {
+  return isBinaryLanguage(input.language);
 }
 
 function normalizeEmail(email: string): string {
@@ -399,6 +453,9 @@ function mapBotRow(row: BotRow): BotRecord {
       botId: row.id,
       language: row.revision_language,
       source: row.revision_source,
+      artifactFileName: row.revision_artifact_filename,
+      artifactSha256: row.revision_artifact_sha256,
+      artifactSizeBytes: row.revision_artifact_size_bytes,
       version: row.revision_version,
       createdAt: toIso(row.revision_created_at)
     }
@@ -433,6 +490,10 @@ function mapParticipantRow(row: MatchParticipantRow): MatchParticipantRecord {
     botName: row.bot_name,
     language: row.language,
     source: row.source,
+    artifactBase64: row.artifact_base64,
+    artifactFileName: row.artifact_filename,
+    artifactSha256: row.artifact_sha256,
+    artifactSizeBytes: row.artifact_size_bytes,
     revisionVersion: row.revision_version,
     teamId: row.team_id,
     slot: row.slot
@@ -472,6 +533,9 @@ function mapBotRevisionLookupRow(row: BotRevisionLookupRow): BotRevisionLookupRe
     botId: row.bot_id,
     language: row.language,
     source: row.source,
+    artifactFileName: row.artifact_filename,
+    artifactSha256: row.artifact_sha256,
+    artifactSizeBytes: row.artifact_size_bytes,
     version: row.version,
     createdAt: toIso(row.created_at),
     ownerUserId: row.owner_user_id,
@@ -509,6 +573,41 @@ async function withTransaction<T>(pool: Pool, work: (client: PoolClient) => Prom
   } finally {
     client.release();
   }
+}
+
+async function insertBotRevision(
+  client: PoolClient,
+  botId: string,
+  version: number,
+  input: CreateBotInput | UpdateBotInput
+): Promise<void> {
+  await client.query(
+    `
+      INSERT INTO bot_revisions (
+        id,
+        bot_id,
+        language,
+        source,
+        artifact_base64,
+        artifact_filename,
+        artifact_sha256,
+        artifact_size_bytes,
+        version
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `,
+    [
+      randomUUID(),
+      botId,
+      input.language,
+      "source" in input ? input.source : "",
+      hasBinaryArtifact(input) ? input.artifactBase64 ?? null : null,
+      hasBinaryArtifact(input) ? input.artifactFileName ?? null : null,
+      hasBinaryArtifact(input) ? input.artifactSha256 ?? null : null,
+      hasBinaryArtifact(input) ? input.artifactSizeBytes ?? null : null,
+      version
+    ]
+  );
 }
 
 export class Database {
@@ -881,12 +980,15 @@ export class Database {
         br.id AS revision_id,
         br.language AS revision_language,
         br.source AS revision_source,
+        br.artifact_filename AS revision_artifact_filename,
+        br.artifact_sha256 AS revision_artifact_sha256,
+        br.artifact_size_bytes AS revision_artifact_size_bytes,
         br.version AS revision_version,
         br.created_at AS revision_created_at
       FROM bots AS b
       LEFT JOIN users AS u ON u.id = b.owner_user_id
       JOIN LATERAL (
-        SELECT id, language, source, version, created_at
+        SELECT id, language, source, artifact_filename, artifact_sha256, artifact_size_bytes, version, created_at
         FROM bot_revisions
         WHERE bot_id = b.id
         ORDER BY version DESC
@@ -919,12 +1021,15 @@ export class Database {
         br.id AS revision_id,
         br.language AS revision_language,
         br.source AS revision_source,
+        br.artifact_filename AS revision_artifact_filename,
+        br.artifact_sha256 AS revision_artifact_sha256,
+        br.artifact_size_bytes AS revision_artifact_size_bytes,
         br.version AS revision_version,
         br.created_at AS revision_created_at
       FROM bots AS b
       LEFT JOIN users AS u ON u.id = b.owner_user_id
       JOIN LATERAL (
-        SELECT id, language, source, version, created_at
+        SELECT id, language, source, artifact_filename, artifact_sha256, artifact_size_bytes, version, created_at
         FROM bot_revisions
         WHERE bot_id = b.id
         ORDER BY version DESC
@@ -952,6 +1057,9 @@ export class Database {
         br.bot_id,
         br.language,
         br.source,
+        br.artifact_filename,
+        br.artifact_sha256,
+        br.artifact_size_bytes,
         br.version,
         br.created_at,
         b.owner_user_id,
@@ -970,7 +1078,6 @@ export class Database {
   async createBot(input: CreateBotInput, ownerUserId: string): Promise<BotRecord> {
     const botId = await withTransaction(this.pool, async (client) => {
       const createdBotId = randomUUID();
-      const revisionId = randomUUID();
 
       await client.query(
         `
@@ -980,13 +1087,7 @@ export class Database {
         [createdBotId, ownerUserId, input.name, input.description ?? ""]
       );
 
-      await client.query(
-        `
-          INSERT INTO bot_revisions (id, bot_id, language, source, version)
-          VALUES ($1, $2, $3, $4, 1)
-        `,
-        [revisionId, createdBotId, input.language, input.source]
-      );
+      await insertBotRevision(client, createdBotId, 1, input);
 
       return createdBotId;
     });
@@ -999,7 +1100,7 @@ export class Database {
     return bot;
   }
 
-  async updateBot(botId: string, input: CreateBotInput): Promise<BotRecord> {
+  async updateBot(botId: string, input: UpdateBotInput): Promise<BotRecord> {
     await withTransaction(this.pool, async (client) => {
       const updateResult = await client.query<{ id: string }>(
         `
@@ -1027,13 +1128,43 @@ export class Database {
         [botId]
       );
 
-      await client.query(
-        `
-          INSERT INTO bot_revisions (id, bot_id, language, source, version)
-          VALUES ($1, $2, $3, $4, $5)
-        `,
-        [randomUUID(), botId, input.language, input.source, versionResult.rows[0].next_version]
-      );
+      let revisionInput: UpdateBotInput = input;
+
+      if (isBinaryLanguage(revisionInput.language) && !("artifactBase64" in revisionInput && revisionInput.artifactBase64)) {
+        const currentRevision = await client.query<{
+          language: SupportedLanguage;
+          artifact_base64: string | null;
+          artifact_filename: string | null;
+          artifact_sha256: string | null;
+          artifact_size_bytes: number | null;
+        }>(
+          `
+            SELECT language, artifact_base64, artifact_filename, artifact_sha256, artifact_size_bytes
+            FROM bot_revisions
+            WHERE bot_id = $1
+            ORDER BY version DESC
+            LIMIT 1
+          `,
+          [botId]
+        );
+
+        const previous = currentRevision.rows[0];
+        if (!previous || previous.language !== "linux-x64-binary" || !previous.artifact_base64) {
+          throw new Error(`Bot ${botId} requires a Linux x64 binary artifact upload`);
+        }
+
+        const binaryInput = revisionInput as UpdateBinaryBotInput;
+        revisionInput = {
+          ...binaryInput,
+          artifactBase64: previous.artifact_base64,
+          artifactFileName: binaryInput.artifactFileName ?? previous.artifact_filename ?? "bot.bin",
+          artifactSha256: binaryInput.artifactSha256 ?? previous.artifact_sha256 ?? "",
+          artifactSizeBytes: binaryInput.artifactSizeBytes ?? previous.artifact_size_bytes ?? 0,
+          preserveExistingArtifact: true
+        };
+      }
+
+      await insertBotRevision(client, botId, versionResult.rows[0].next_version, revisionInput);
     });
 
     const bot = await this.getBot(botId);
@@ -1316,6 +1447,10 @@ export class Database {
         b.name AS bot_name,
         br.language,
         br.source,
+        br.artifact_base64,
+        br.artifact_filename,
+        br.artifact_sha256,
+        br.artifact_size_bytes,
         br.version AS revision_version,
         mp.team_id,
         mp.slot
@@ -1389,6 +1524,10 @@ export class Database {
         b.name AS bot_name,
         br.language,
         br.source,
+        br.artifact_base64,
+        br.artifact_filename,
+        br.artifact_sha256,
+        br.artifact_size_bytes,
         br.version AS revision_version,
         mp.team_id,
         mp.slot

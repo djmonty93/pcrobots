@@ -152,7 +152,10 @@ function createBotRecord(body, ownerUserId) {
       id: randomUUID(),
       botId: id,
       language: body.language,
-      source: body.source,
+      source: body.source ?? "",
+      artifactFileName: body.artifactFileName ?? null,
+      artifactSha256: null,
+      artifactSizeBytes: null,
       version: 1,
       createdAt: now
     }
@@ -218,6 +221,9 @@ function createMatchRecord({ name, mode, arena, participants, ownerUserId }) {
         botName: bot?.name ?? `Bot ${index + 1}`,
         language: bot?.latestRevision.language ?? "javascript",
         source: bot?.latestRevision.source ?? "",
+        artifactFileName: bot?.latestRevision.artifactFileName ?? null,
+        artifactSha256: bot?.latestRevision.artifactSha256 ?? null,
+        artifactSizeBytes: bot?.latestRevision.artifactSizeBytes ?? null,
         revisionVersion: bot?.latestRevision.version ?? 1,
         teamId: participant.teamId,
         slot: index
