@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -13,7 +13,6 @@ function createExecutableFromArtifact(id: string, artifactBase64: string): strin
   const executablePath = path.join(directory, "bot.bin");
   const artifact = Buffer.from(artifactBase64, "base64");
   writeFileSync(executablePath, artifact, { mode: 0o755 });
-  chmodSync(executablePath, 0o755);
   return executablePath;
 }
 

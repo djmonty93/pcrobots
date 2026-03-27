@@ -168,7 +168,6 @@ export interface UpdateBinaryBotInput extends BaseBotInput {
   artifactFileName?: string;
   artifactSha256?: string;
   artifactSizeBytes?: number;
-  preserveExistingArtifact?: boolean;
 }
 
 export type CreateBotInput =
@@ -1119,52 +1118,22 @@ export class Database {
         throw new Error(`Bot ${botId} was not found`);
       }
 
-      const versionResult = await client.query<{ next_version: number }>(
-        `
-          SELECT COALESCE(MAX(version), 0) + 1 AS next_version
-          FROM bot_revisions
-          WHERE bot_id = $1
-        `,
-        [botId]
-      );
+      // For binary bots with no new artifact, metadata update above is sufficient — skip new revision.
+      const isMetadataOnlyBinaryUpdate =
+        isBinaryLanguage(input.language) && !("artifactBase64" in input && input.artifactBase64);
 
-      let revisionInput: UpdateBotInput = input;
-
-      if (isBinaryLanguage(revisionInput.language) && !("artifactBase64" in revisionInput && revisionInput.artifactBase64)) {
-        const currentRevision = await client.query<{
-          language: SupportedLanguage;
-          artifact_base64: string | null;
-          artifact_filename: string | null;
-          artifact_sha256: string | null;
-          artifact_size_bytes: number | null;
-        }>(
+      if (!isMetadataOnlyBinaryUpdate) {
+        const versionResult = await client.query<{ next_version: number }>(
           `
-            SELECT language, artifact_base64, artifact_filename, artifact_sha256, artifact_size_bytes
+            SELECT COALESCE(MAX(version), 0) + 1 AS next_version
             FROM bot_revisions
             WHERE bot_id = $1
-            ORDER BY version DESC
-            LIMIT 1
           `,
           [botId]
         );
 
-        const previous = currentRevision.rows[0];
-        if (!previous || previous.language !== "linux-x64-binary" || !previous.artifact_base64) {
-          throw new Error(`Bot ${botId} requires a Linux x64 binary artifact upload`);
-        }
-
-        const binaryInput = revisionInput as UpdateBinaryBotInput;
-        revisionInput = {
-          ...binaryInput,
-          artifactBase64: previous.artifact_base64,
-          artifactFileName: binaryInput.artifactFileName ?? previous.artifact_filename ?? "bot.bin",
-          artifactSha256: binaryInput.artifactSha256 ?? previous.artifact_sha256 ?? "",
-          artifactSizeBytes: binaryInput.artifactSizeBytes ?? previous.artifact_size_bytes ?? 0,
-          preserveExistingArtifact: true
-        };
+        await insertBotRevision(client, botId, versionResult.rows[0].next_version, input);
       }
-
-      await insertBotRevision(client, botId, versionResult.rows[0].next_version, revisionInput);
     });
 
     const bot = await this.getBot(botId);

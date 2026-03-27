@@ -317,7 +317,6 @@ export type UpdateBotInput =
       language: "linux-x64-binary";
       artifactBase64?: string;
       artifactFileName?: string;
-      preserveExistingArtifact?: boolean;
     };
 
 export interface ArenaInput {
