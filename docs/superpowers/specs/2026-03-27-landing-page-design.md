@@ -142,9 +142,17 @@ Top to bottom:
 > "Write code. Build robots. Fight."
 
 ### 3. Description (2 sentences)
-> PCRobots is a competitive programming game inspired by the classic 1980s DOS battle-bot arena. You write AI code in any of 5 languages — your robot fights for survival against others in real time.
+> PCRobots is a competitive programming game inspired by the classic DOS battle-bot arena originally created by PD Smith in the early 1990s. You write AI code in any of 5 languages — your robot fights for survival against others in real time.
 
-### 4. Feature chips
+### 4. Attribution line
+
+A small credit line below the description, linking to the original:
+
+> Based on the original PCRobots by [PD Smith](https://www.pscs.co.uk/pcrobots/index.php) (early 1990s)
+
+Rendered as a single line of `--text-muted` text with the link styled in `--accent`. Opens in a new tab (`target="_blank" rel="noopener noreferrer"`).
+
+### 5. Feature chips
 
 Four small inline badges using a new `.landing-chip` class (not `.stat-chip` — that is a KPI dashboard widget with a label/value/delta layout and is not appropriate here).
 
@@ -165,14 +173,14 @@ Four small inline badges using a new `.landing-chip` class (not `.stat-chip` —
 
 Labels: `5 languages` · `Live replays` · `Ladders` · `Tournaments`
 
-### 5. How to play (3-step flow)
+### 6. How to play (3-step flow)
 Step indicators with numbered circles and brief labels:
 
 1. **Write a bot** — Code your robot's AI in JavaScript, TypeScript, Python, Lua, or upload a Linux binary
 2. **Pick an arena** — Choose a battlefield with walls, hazards, refuel zones, and damage traps
 3. **Battle** — Run matches, climb ladder rankings, or compete in elimination tournaments
 
-### 6. Doc links
+### 7. Doc links
 Two prominent text links using `--accent` colour with arrow:
 - `Bot creation guide →` — navigates to `/docs/creating-bots` via `history.pushState`
 - `Running a match →` — navigates to `/docs/running-bots` via `history.pushState`
