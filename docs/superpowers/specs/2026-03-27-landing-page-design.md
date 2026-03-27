@@ -29,6 +29,18 @@ The router state lives in a new `currentRoute` state variable in `App.tsx`:
 type Route = "landing" | "docs-creating-bots" | "docs-running-bots";
 ```
 
+A `routeFromPathname` helper maps `window.location.pathname` to a `Route`:
+
+```ts
+function routeFromPathname(pathname: string): Route {
+  if (pathname === "/docs/creating-bots") return "docs-creating-bots";
+  if (pathname === "/docs/running-bots") return "docs-running-bots";
+  return "landing"; // "/" and all unknown paths
+}
+```
+
+This helper is used both on initial mount (`useState(() => routeFromPathname(window.location.pathname))`) and in the `popstate` handler.
+
 ### Route table
 
 | Path | Unauthenticated | Authenticated |
@@ -200,7 +212,19 @@ Doc pages render outside `.shell` (same as the landing page — both use their o
 
 ### What is a bot?
 
-A bot is a function called once per game tick. It receives a snapshot of the current game state (position, heading, nearby robots, scan results, health, fuel) and returns an action object.
+A bot is a function called once per game tick. It receives a `RobotTurnSnapshot` and returns an action object.
+
+The snapshot has three fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `tick` | `number` | Current game tick (0-indexed) |
+| `self` | `RobotObservation` | Your robot's current state |
+| `localMap` | `number[][]` | 9×9 grid of cell types centred on your robot |
+
+`self` contains: `id`, `name`, `teamId`, `x`, `y`, `heading`, `speed`, `battery`, `armour`, `shellsLeft`, `invisible`.
+
+`localMap` cell values: `0` = free, `1` = wall/out-of-bounds, `2` = slow, `3` = damage, `4` = obstacle, `30` = refuel.
 
 ### Supported languages
 
