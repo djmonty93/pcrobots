@@ -1,4 +1,4 @@
-FROM node:22-alpine
+FROM public.ecr.aws/docker/library/node:22-alpine
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json README.md ./
 COPY apps ./apps
