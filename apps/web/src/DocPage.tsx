@@ -134,8 +134,8 @@ return on_turn`}</code></pre>
         <h2>Uploading your bot</h2>
         <ol>
           <li>Go to the <strong>Bots</strong> tab after signing in</li>
-          <li>Click <strong>New bot</strong></li>
-          <li>Choose a language, paste your code (or upload a binary), and save</li>
+          <li>Enter a name, choose a language, and paste your code or upload a binary</li>
+          <li>Click <strong>Save bot revision</strong> to store the latest version</li>
         </ol>
       </section>
     </DocPage>
@@ -176,8 +176,8 @@ export function RunningBotsPage({ onNavigate }: DocPageNavProps) {
         <h2>Running a match</h2>
         <ol>
           <li>Go to the <strong>Matches</strong> tab</li>
-          <li>Pick an arena, add bots (assign to teams A/B/C), set a tick limit and seed</li>
-          <li>Click <strong>Run</strong> — results appear immediately, or <strong>Enqueue</strong> to run via the background worker</li>
+          <li>Pick an arena, choose bots for team A and team B, then set a tick limit and seed</li>
+          <li>Click <strong>Store and run now</strong> for an immediate result, or switch to queued mode and use <strong>Store and enqueue</strong></li>
           <li>View the tick-by-tick replay in the match list</li>
         </ol>
       </section>

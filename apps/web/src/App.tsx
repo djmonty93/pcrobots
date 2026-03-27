@@ -272,10 +272,30 @@ type Tab = "bots" | "arenas" | "matches" | "compete" | "accounts";
 
 type Route = "landing" | "docs-creating-bots" | "docs-running-bots";
 
+function normalizePathname(path: string): string {
+  if (!path) {
+    return "/";
+  }
+
+  return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+}
+
 function routeFromPathname(path: string): Route {
-  if (path === "/docs/creating-bots") return "docs-creating-bots";
-  if (path === "/docs/running-bots") return "docs-running-bots";
+  const normalizedPath = normalizePathname(path);
+  if (normalizedPath === "/docs/creating-bots") return "docs-creating-bots";
+  if (normalizedPath === "/docs/running-bots") return "docs-running-bots";
   return "landing";
+}
+
+function canonicalPathForRoute(route: Route): string {
+  switch (route) {
+    case "docs-creating-bots":
+      return "/docs/creating-bots";
+    case "docs-running-bots":
+      return "/docs/running-bots";
+    default:
+      return "/";
+  }
 }
 
 function StatRow(props: { chips: Array<{ label: string; value: number | string }> }) {
@@ -325,16 +345,34 @@ export function App() {
   );
 
   function navigate(path: string): void {
-    window.history.pushState(null, "", path);
-    setCurrentRoute(routeFromPathname(path));
+    const route = routeFromPathname(path);
+    const canonicalPath = canonicalPathForRoute(route);
+    if (window.location.pathname !== canonicalPath) {
+      window.history.pushState(null, "", canonicalPath);
+    }
+    setCurrentRoute(route);
   }
 
   useEffect(() => {
-    function handlePopState() {
-      setCurrentRoute(routeFromPathname(window.location.pathname));
+    const initialRoute = routeFromPathname(window.location.pathname);
+    const initialCanonicalPath = canonicalPathForRoute(initialRoute);
+    if (window.location.pathname !== initialCanonicalPath) {
+      window.history.replaceState(null, "", initialCanonicalPath);
     }
+
+    function handlePopState() {
+      const nextRoute = routeFromPathname(window.location.pathname);
+      const canonicalPath = canonicalPathForRoute(nextRoute);
+      if (window.location.pathname !== canonicalPath) {
+        window.history.replaceState(null, "", canonicalPath);
+      }
+      setCurrentRoute(nextRoute);
+    }
+
     window.addEventListener("popstate", handlePopState);
-    return () => { window.removeEventListener("popstate", handlePopState); };
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
   }, []);
 
   useEffect(() => {
