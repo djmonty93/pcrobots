@@ -37,7 +37,7 @@ test("browser smoke covers registration, resource authoring, and live match flow
 
   await loginPanel.getByLabel("Email").fill(accountEmail);
   await loginPanel.getByLabel("Password").fill(accountPassword);
-  await loginPanel.getByRole("button", { name: "Create user account" }).click();
+  await loginPanel.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByText(`Created and signed into ${accountEmail}`)).toBeVisible();
   await expect(page.getByRole("heading", { name: "User workspace" })).toBeVisible();
 
