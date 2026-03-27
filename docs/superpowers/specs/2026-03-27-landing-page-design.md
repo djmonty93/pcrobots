@@ -76,9 +76,22 @@ Set `document.title` on each route change:
 
 ---
 
+## Render Logic
+
+The top-level render uses this priority order:
+
+```
+if currentRoute === "docs-creating-bots" → render <DocPage> (outside .shell, any auth state)
+if currentRoute === "docs-running-bots"  → render <DocPage> (outside .shell, any auth state)
+if currentUser === null                  → render landing page (outside .shell)
+else                                     → render .shell app (tabs, as today)
+```
+
+Doc pages always render outside `.shell` regardless of whether the user is authenticated. A logged-in user visiting `/docs/creating-bots` sees only the doc page — no sidebar, no app shell. They can navigate back to the app via the `← PCRobots` link (which, for authenticated users, navigates to `/` which then renders the app shell).
+
 ## Landing Page DOM Structure
 
-The landing page renders **outside** the existing `.shell` layout. When `currentRoute === "landing"` and `currentUser` is null, the top-level render returns the landing page element directly instead of the `.shell` div. This is necessary because `.shell` is `height: 100vh; overflow: hidden` and would break the sticky right-column behaviour.
+The landing page renders **outside** the existing `.shell` layout. When rendering the landing page, the top-level render returns the `.landing-shell` element directly instead of the `.shell` div. This is necessary because `.shell` is `height: 100vh; overflow: hidden` and would break the sticky right-column behaviour.
 
 ```
 <div class="landing-shell">
@@ -86,7 +99,7 @@ The landing page renders **outside** the existing `.shell` layout. When `current
   <div class="landing-right">  <!-- sticky login form -->
 ```
 
-The `.shell`, `.sidebar`, `.content-wrap` etc. are not rendered at all on the landing page.
+The `.shell`, `.sidebar`, `.content-wrap` etc. are not rendered at all on the landing page or doc pages.
 
 ---
 
@@ -123,7 +136,7 @@ Top to bottom:
 
 ### 1. Logo + wordmark
 - "PCRobots" in JetBrains Mono, large (2rem+), semibold weight
-- Unicode robot emoji `⚙` or `🤖` as inline decoration (no SVG dependency)
+- Unicode robot emoji `🤖` as inline decoration (no SVG dependency)
 
 ### 2. Tagline
 > "Write code. Build robots. Fight."
