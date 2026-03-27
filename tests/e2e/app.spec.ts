@@ -37,7 +37,7 @@ test("browser smoke covers registration, resource authoring, and live match flow
 
   await loginPanel.getByLabel("Email").fill(accountEmail);
   await loginPanel.getByLabel("Password").fill(accountPassword);
-  await loginPanel.getByRole("button", { name: "Create user account" }).click();
+  await loginPanel.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByText(`Created and signed into ${accountEmail}`)).toBeVisible();
   await expect(page.getByRole("heading", { name: "User workspace" })).toBeVisible();
 
@@ -114,4 +114,21 @@ test("browser smoke covers admin account management and ownership transfer", asy
   await adminUsersPanel.getByLabel("Transfer owned resources to").selectOption({ label: recipientEmail });
   await adminUsersPanel.getByRole("button", { name: "Transfer ownership" }).click();
   await expect(page.getByText(/Transferred .* bots, .* arenas, .* ladders, .* tournaments, and .* matches/)).toBeVisible();
+});
+
+test("browser smoke covers public docs routes and unknown-path normalization", async ({ page }) => {
+  await page.goto("/docs/creating-bots");
+  await expect(page).toHaveURL(/\/docs\/creating-bots$/);
+  await expect(page.getByRole("heading", { name: "Creating a Bot" })).toBeVisible();
+  await expect(page.getByText("Save bot revision")).toBeVisible();
+
+  await page.getByRole("link", { name: "Next: Running a match →" }).click();
+  await expect(page).toHaveURL(/\/docs\/running-bots$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Running a Match" })).toBeVisible();
+  await expect(page.getByText("Store and run now")).toBeVisible();
+  await expect(page.getByText("Store and enqueue")).toBeVisible();
+
+  await page.goto("/totally-unknown");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId("login-panel")).toBeVisible();
 });

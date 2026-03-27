@@ -43,6 +43,7 @@ import {
 } from "./api.js";
 import { CodeEditor } from "./CodeEditor.js";
 import { ReplayViewer } from "./ReplayViewer.js";
+import { CreatingBotsPage, RunningBotsPage } from "./DocPage.js";
 
 const defaultBotTemplates: Record<SupportedLanguage, string> = {
   javascript: `module.exports = function onTurn(snapshot) {
@@ -269,6 +270,34 @@ function OwnerLabel({ ownerEmail, isAdmin }: { ownerEmail: string | null; isAdmi
 
 type Tab = "bots" | "arenas" | "matches" | "compete" | "accounts";
 
+type Route = "landing" | "docs-creating-bots" | "docs-running-bots";
+
+function normalizePathname(path: string): string {
+  if (!path) {
+    return "/";
+  }
+
+  return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+}
+
+function routeFromPathname(path: string): Route {
+  const normalizedPath = normalizePathname(path);
+  if (normalizedPath === "/docs/creating-bots") return "docs-creating-bots";
+  if (normalizedPath === "/docs/running-bots") return "docs-running-bots";
+  return "landing";
+}
+
+function canonicalPathForRoute(route: Route): string {
+  switch (route) {
+    case "docs-creating-bots":
+      return "/docs/creating-bots";
+    case "docs-running-bots":
+      return "/docs/running-bots";
+    default:
+      return "/";
+  }
+}
+
 function StatRow(props: { chips: Array<{ label: string; value: number | string }> }) {
   return (
     <div className="stat-row">
@@ -309,6 +338,54 @@ export function App() {
   const [userForm, setUserForm] = useState(createInitialUserState);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [transferTargetUserId, setTransferTargetUserId] = useState("");
+
+  // ── Routing ──────────────────────────────────────────────────────────────
+  const [currentRoute, setCurrentRoute] = useState<Route>(() =>
+    routeFromPathname(window.location.pathname)
+  );
+
+  function navigate(path: string): void {
+    const route = routeFromPathname(path);
+    const canonicalPath = canonicalPathForRoute(route);
+    if (window.location.pathname !== canonicalPath) {
+      window.history.pushState(null, "", canonicalPath);
+    }
+    setCurrentRoute(route);
+    window.scrollTo(0, 0);
+  }
+
+  useEffect(() => {
+    const initialRoute = routeFromPathname(window.location.pathname);
+    const initialCanonicalPath = canonicalPathForRoute(initialRoute);
+    if (window.location.pathname !== initialCanonicalPath) {
+      window.history.replaceState(null, "", initialCanonicalPath);
+    }
+
+    function handlePopState() {
+      const nextRoute = routeFromPathname(window.location.pathname);
+      const canonicalPath = canonicalPathForRoute(nextRoute);
+      if (window.location.pathname !== canonicalPath) {
+        window.history.replaceState(null, "", canonicalPath);
+      }
+      setCurrentRoute(nextRoute);
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (currentRoute === "docs-creating-bots") {
+      document.title = "Creating a Bot — PCRobots";
+    } else if (currentRoute === "docs-running-bots") {
+      document.title = "Running a Match — PCRobots";
+    } else {
+      document.title = "PCRobots";
+    }
+  }, [currentRoute]);
+  // ─────────────────────────────────────────────────────────────────────────
 
   const [activeTab, setActiveTab] = useState<Tab>("bots");
   const [theme, setTheme] = useState<"dark" | "light">(() => {
@@ -958,12 +1035,99 @@ export function App() {
     }
   }
 
+  // Doc pages render for all users (authenticated or not)
+  if (currentRoute === "docs-creating-bots") {
+    return <CreatingBotsPage onNavigate={navigate} />;
+  }
+  if (currentRoute === "docs-running-bots") {
+    return <RunningBotsPage onNavigate={navigate} />;
+  }
+
+  // Landing page for unauthenticated users
   if (!currentUser) {
     return (
-      <div className="shell">
-        <div className="content-wrap">
-          <main className="content">
-            <div className="content-inner login-frame">
+      <div className="landing-shell">
+        {/* ── Left: Marketing ── */}
+        <div className="landing-left">
+          <div className="landing-wordmark">
+            <span aria-hidden="true">🤖</span>
+            <span>PCRobots</span>
+          </div>
+
+          <p className="landing-tagline">Write code. Build robots. Fight.</p>
+
+          <p className="landing-description">
+            PCRobots is a competitive programming game inspired by the classic
+            DOS battle-bot arena originally created by PD Smith in the early
+            1990s. You write AI code in any of 5 languages — your robot fights
+            for survival against others in real time.
+          </p>
+
+          <p className="landing-attribution">
+            Based on the original PCRobots by{" "}
+            <a
+              href="https://www.pscs.co.uk/pcrobots/index.php"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              PD Smith
+            </a>{" "}
+            (early 1990s)
+          </p>
+
+          <div className="landing-chips">
+            <span className="landing-chip">5 languages</span>
+            <span className="landing-chip">Live replays</span>
+            <span className="landing-chip">Ladders</span>
+            <span className="landing-chip">Tournaments</span>
+          </div>
+
+          <div className="landing-steps">
+            <div className="landing-steps-title">How to play</div>
+            <div className="landing-step">
+              <div className="landing-step-num">1</div>
+              <div className="landing-step-body">
+                <strong>Write a bot</strong>
+                <span>Code your robot's AI in JavaScript, TypeScript, Python, Lua, or upload a Linux binary</span>
+              </div>
+            </div>
+            <div className="landing-step">
+              <div className="landing-step-num">2</div>
+              <div className="landing-step-body">
+                <strong>Pick an arena</strong>
+                <span>Choose a battlefield with walls, hazards, refuel zones, and damage traps</span>
+              </div>
+            </div>
+            <div className="landing-step">
+              <div className="landing-step-num">3</div>
+              <div className="landing-step-body">
+                <strong>Battle</strong>
+                <span>Run matches, climb ladder rankings, or compete in elimination tournaments</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="landing-links">
+            <a
+              className="landing-link"
+              href="/docs/creating-bots"
+              onClick={(e) => { e.preventDefault(); navigate("/docs/creating-bots"); }}
+            >
+              Bot creation guide →
+            </a>
+            <a
+              className="landing-link"
+              href="/docs/running-bots"
+              onClick={(e) => { e.preventDefault(); navigate("/docs/running-bots"); }}
+            >
+              Running a match →
+            </a>
+          </div>
+        </div>
+
+        {/* ── Right: Login form ── */}
+        <div className="landing-right">
+          <div className="landing-form-wrap">
             <section className="panel" data-testid="login-panel">
               <div className="panel-header">
                 <div>
@@ -994,16 +1158,15 @@ export function App() {
                 </div>
                 <div className="button-cluster">
                   <button className="primary-button" type="submit" disabled={submitting || loading}>
-                    {loading ? "Checking session..." : "Sign in"}
+                    {loading ? "Checking…" : "Sign in"}
                   </button>
                   <button className="ghost-button" type="button" onClick={() => void handleRegister()} disabled={submitting || loading}>
-                    Create user account
+                    Create account
                   </button>
                 </div>
               </form>
             </section>
-            </div>
-          </main>
+          </div>
         </div>
       </div>
     );

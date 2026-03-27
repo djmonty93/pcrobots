@@ -1,6 +1,8 @@
 import { defineConfig } from "@playwright/test";
+import { resolve } from "node:path";
 
 const useMockApi = process.env.PCROBOTS_E2E_USE_MOCK_API === "1";
+const repoRoot = process.cwd();
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -17,7 +19,7 @@ export default defineConfig({
   webServer: [
     {
       command: useMockApi ? "node tests/e2e/mock-api.mjs" : "node dist/apps/api/src/server.js",
-      cwd: useMockApi ? "H:/Code/pcrobots" : "H:/Code/pcrobots/apps/api",
+      cwd: useMockApi ? repoRoot : resolve(repoRoot, "apps/api"),
       env: {
         ...process.env,
         PORT: "3101",
@@ -31,7 +33,7 @@ export default defineConfig({
     },
     {
       command: "node server.mjs",
-      cwd: "H:/Code/pcrobots/apps/web",
+      cwd: resolve(repoRoot, "apps/web"),
       env: {
         ...process.env,
         PORT: "4173",
