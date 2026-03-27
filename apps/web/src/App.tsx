@@ -270,6 +270,14 @@ function OwnerLabel({ ownerEmail, isAdmin }: { ownerEmail: string | null; isAdmi
 
 type Tab = "bots" | "arenas" | "matches" | "compete" | "accounts";
 
+type Route = "landing" | "docs-creating-bots" | "docs-running-bots";
+
+function routeFromPathname(path: string): Route {
+  if (path === "/docs/creating-bots") return "docs-creating-bots";
+  if (path === "/docs/running-bots") return "docs-running-bots";
+  return "landing";
+}
+
 function StatRow(props: { chips: Array<{ label: string; value: number | string }> }) {
   return (
     <div className="stat-row">
@@ -312,14 +320,6 @@ export function App() {
   const [transferTargetUserId, setTransferTargetUserId] = useState("");
 
   // ── Routing ──────────────────────────────────────────────────────────────
-  type Route = "home" | "docs-creating-bots" | "docs-running-bots";
-
-  function routeFromPathname(path: string): Route {
-    if (path === "/docs/creating-bots") return "docs-creating-bots";
-    if (path === "/docs/running-bots") return "docs-running-bots";
-    return "home";
-  }
-
   const [currentRoute, setCurrentRoute] = useState<Route>(() =>
     routeFromPathname(window.location.pathname)
   );
@@ -336,6 +336,16 @@ export function App() {
     window.addEventListener("popstate", handlePopState);
     return () => { window.removeEventListener("popstate", handlePopState); };
   }, []);
+
+  useEffect(() => {
+    if (currentRoute === "docs-creating-bots") {
+      document.title = "Creating a Bot — PCRobots";
+    } else if (currentRoute === "docs-running-bots") {
+      document.title = "Running a Match — PCRobots";
+    } else {
+      document.title = "PCRobots";
+    }
+  }, [currentRoute]);
   // ─────────────────────────────────────────────────────────────────────────
 
   const [activeTab, setActiveTab] = useState<Tab>("bots");
@@ -1001,7 +1011,7 @@ export function App() {
         {/* ── Left: Marketing ── */}
         <div className="landing-left">
           <div className="landing-wordmark">
-            <span>🤖</span>
+            <span aria-hidden="true">🤖</span>
             <span>PCRobots</span>
           </div>
 

@@ -925,6 +925,8 @@ select {
 }
 
 .landing-right {
+  position: sticky;
+  top: 0;
   flex: 0 0 45%;
   height: 100vh;
   display: flex;
@@ -1003,7 +1005,7 @@ select {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-muted);
+  color: var(--text-dim);
 }
 
 .landing-step {
