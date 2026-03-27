@@ -1,4 +1,4 @@
-export type SupportedLanguage = "javascript" | "typescript" | "python" | "lua";
+export type SupportedLanguage = "javascript" | "typescript" | "python" | "lua" | "linux-x64-binary";
 export type MatchMode = "live" | "queued" | "ladder" | "round-robin" | "single-elimination" | "double-elimination";
 export type MatchStatus = "pending" | "queued" | "running" | "completed" | "failed";
 export type TournamentFormat = "round-robin" | "single-elimination" | "double-elimination";
@@ -60,6 +60,9 @@ export interface BotRevision {
   botId: string;
   language: SupportedLanguage;
   source: string;
+  artifactFileName: string | null;
+  artifactSha256: string | null;
+  artifactSizeBytes: number | null;
   version: number;
   createdAt: string;
 }
@@ -102,6 +105,9 @@ export interface MatchParticipant {
   botName: string;
   language: SupportedLanguage;
   source: string;
+  artifactFileName: string | null;
+  artifactSha256: string | null;
+  artifactSizeBytes: number | null;
   revisionVersion: number;
   teamId: "A" | "B" | "C";
   slot: number;
@@ -283,12 +289,36 @@ export function clearAuthToken(): void {
   removeStorage("localStorage", authStorageKey);
 }
 
-export interface BotInput {
-  name: string;
-  description?: string;
-  language: SupportedLanguage;
-  source: string;
-}
+export type BotInput =
+  | {
+      name: string;
+      description?: string;
+      language: Exclude<SupportedLanguage, "linux-x64-binary">;
+      source: string;
+    }
+  | {
+      name: string;
+      description?: string;
+      language: "linux-x64-binary";
+      artifactBase64: string;
+      artifactFileName: string;
+    };
+
+export type UpdateBotInput =
+  | {
+      name: string;
+      description?: string;
+      language: Exclude<SupportedLanguage, "linux-x64-binary">;
+      source: string;
+    }
+  | {
+      name: string;
+      description?: string;
+      language: "linux-x64-binary";
+      artifactBase64?: string;
+      artifactFileName?: string;
+      preserveExistingArtifact?: boolean;
+    };
 
 export interface ArenaInput {
   name: string;
@@ -403,7 +433,7 @@ export function createBot(input: BotInput): Promise<BotRecord> {
   });
 }
 
-export function updateBot(botId: string, input: BotInput): Promise<BotRecord> {
+export function updateBot(botId: string, input: UpdateBotInput): Promise<BotRecord> {
   return requestJson<BotRecord>(`/api/bots/${botId}`, {
     method: "PUT",
     body: input

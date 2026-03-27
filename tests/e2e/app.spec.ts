@@ -11,6 +11,18 @@ function uniqueEmail(prefix: string): string {
 const adminEmail = process.env.PCROBOTS_ADMIN_EMAIL ?? "admin@pcrobots.local";
 const adminPassword = process.env.PCROBOTS_ADMIN_PASSWORD ?? "change-me-admin-password";
 
+function fakeElfBinary(): Buffer {
+  const buffer = Buffer.alloc(64, 0);
+  buffer[0] = 0x7f;
+  buffer[1] = 0x45;
+  buffer[2] = 0x4c;
+  buffer[3] = 0x46;
+  buffer[4] = 2;
+  buffer[5] = 1;
+  buffer[18] = 0x3e;
+  return buffer;
+}
+
 test("browser smoke covers registration, resource authoring, and live match flows", async ({ page }) => {
   const accountEmail = uniqueEmail("browser-user");
   const accountPassword = `BrowserPass${Date.now()}99`;
@@ -35,7 +47,12 @@ test("browser smoke covers registration, resource authoring, and live match flow
   await expect(page.getByText(`Saved ${alphaName}`)).toBeVisible();
 
   await botSection.getByLabel("Name").fill(betaName);
-  await botSection.getByLabel("Language").selectOption("lua");
+  await botSection.getByLabel("Language").selectOption("linux-x64-binary");
+  await botSection.getByLabel("Linux x64 executable").setInputFiles({
+    name: "bot.elf",
+    mimeType: "application/octet-stream",
+    buffer: fakeElfBinary()
+  });
   await botSection.getByRole("button", { name: /save/i }).click();
   await expect(page.getByText(`Saved ${betaName}`)).toBeVisible();
 
@@ -50,7 +67,7 @@ test("browser smoke covers registration, resource authoring, and live match flow
   await matchSection.getByLabel("Name").fill(liveMatchName);
   await matchSection.getByLabel("Arena").selectOption({ label: arenaName });
   await matchSection.getByLabel("Team A bot").selectOption({ label: `${alphaName} (javascript)` });
-  await matchSection.getByLabel("Team B bot").selectOption({ label: `${betaName} (lua)` });
+  await matchSection.getByLabel("Team B bot").selectOption({ label: `${betaName} (linux-x64-binary)` });
   await matchSection.getByLabel("Seed").fill("21");
   await matchSection.getByLabel("Max ticks").fill("40");
   await matchSection.getByRole("button", { name: "Store and run now" }).click();

@@ -15,6 +15,10 @@ function makeParticipant(id: string, language: string, teamId: "A" | "B", slot: 
     botName: `Bot ${id}`,
     language: language as MatchParticipantRecord["language"],
     source: "module.exports = () => ({ kind: 'noop' });",
+    artifactBase64: null,
+    artifactFileName: null,
+    artifactSha256: null,
+    artifactSizeBytes: null,
     revisionVersion: 1,
     teamId,
     slot
@@ -85,6 +89,22 @@ end`
 
   assert.equal(Array.isArray(simulated.events), true);
   assert.equal(typeof simulated.result.finished, "boolean");
+});
+
+test("simulateMatch throws if a linux-x64-binary participant has no artifact payload", () => {
+  const participants = [
+    {
+      ...makeParticipant("p1", "linux-x64-binary", "A", 0),
+      source: "",
+      artifactBase64: null
+    },
+    makeParticipant("p2", "javascript", "B", 1)
+  ];
+
+  assert.throws(
+    () => simulateMatch(makeMatch(participants)),
+    /missing its artifact payload/
+  );
 });
 
 test("applyEliminationTiebreak uses battery as secondary tiebreak when armour is equal", () => {

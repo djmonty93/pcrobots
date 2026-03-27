@@ -1,11 +1,13 @@
 import type { RobotCommand, RobotTurnSnapshot } from "@pcrobots/engine";
 
 export type BotLanguage = "javascript" | "typescript" | "python" | "lua";
+export type NativeBotLanguage = "linux-x64-binary";
+export type AnyBotLanguage = BotLanguage | NativeBotLanguage;
 
 export interface BotRevisionRef {
   botId: string;
   revisionId: string;
-  language: BotLanguage;
+  language: AnyBotLanguage;
 }
 
 export interface RunnerLimits {
@@ -38,13 +40,19 @@ export interface BotSourceFile {
   source: string;
 }
 
+export interface NativeBotFile {
+  language: NativeBotLanguage;
+  artifactBase64: string;
+}
+
 export interface LoadedBot {
   id: string;
-  language: BotLanguage;
+  language: AnyBotLanguage;
   runTurn(snapshot: RobotTurnSnapshot, timeoutMs?: number): RobotCommand;
 }
 
 export * from "./javascript.js";
 export { loadLuaBot } from "./lua.js";
+export { loadNativeLinuxBot } from "./native.js";
 export { loadPythonBot } from "./python.js";
 export * from "./runtime.js";

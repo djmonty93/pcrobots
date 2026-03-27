@@ -8,7 +8,7 @@ import {
   type MatchResult,
   type MatchState
 } from "@pcrobots/engine";
-import { loadJavaScriptBot, loadLuaBot, loadPythonBot, type LoadedBot } from "@pcrobots/bot-sdk";
+import { loadJavaScriptBot, loadLuaBot, loadNativeLinuxBot, loadPythonBot, type LoadedBot } from "@pcrobots/bot-sdk";
 
 import { type MatchParticipantRecord, type MatchRecord } from "./db.js";
 
@@ -35,6 +35,14 @@ function loadParticipantBot(participant: MatchParticipantRecord): LoadedBot {
         language: participant.language,
         source: participant.source
       });
+    case "linux-x64-binary":
+      if (!participant.artifactBase64) {
+        throw new Error(`Native Linux bot ${participant.id} is missing its artifact payload`);
+      }
+      return loadNativeLinuxBot(participant.id, {
+        language: participant.language,
+        artifactBase64: participant.artifactBase64
+      });
     default:
       throw new Error(`Unsupported bot language ${(participant as { language: string }).language}`);
   }
@@ -46,6 +54,8 @@ function getTurnTimeoutMs(participant: MatchParticipantRecord): number {
       ? process.env.PCROBOTS_PYTHON_TURN_TIMEOUT_MS
       : participant.language === "lua"
         ? process.env.PCROBOTS_LUA_TURN_TIMEOUT_MS
+        : participant.language === "linux-x64-binary"
+          ? process.env.PCROBOTS_NATIVE_TURN_TIMEOUT_MS
         : process.env.PCROBOTS_SCRIPT_TURN_TIMEOUT_MS;
   const parsed = configured ? Number(configured) : Number.NaN;
 
@@ -59,6 +69,10 @@ function getTurnTimeoutMs(participant: MatchParticipantRecord): number {
 
   if (participant.language === "lua") {
     return 250;
+  }
+
+  if (participant.language === "linux-x64-binary") {
+    return 100;
   }
 
   return 100;
