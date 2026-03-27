@@ -16,7 +16,7 @@ export type MatchMode =
 export type MatchStatus = "pending" | "queued" | "running" | "completed" | "failed";
 
 const DEFAULT_ADMIN_EMAIL = "admin@pcrobots.local";
-const DEFAULT_ADMIN_PASSWORD = "change-me-admin-password";
+const DEFAULT_ADMIN_PASSWORD = "Admin1-change-me-now";
 const DEFAULT_SESSION_TTL_DAYS = 30;
 const MIN_PASSWORD_LENGTH = 12;
 
