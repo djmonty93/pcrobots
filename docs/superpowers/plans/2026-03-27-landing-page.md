@@ -27,7 +27,7 @@
 
 - [ ] **Step 1: Add the `Route` type and `routeFromPathname` helper**
 
-  Add immediately before the `App()` function definition (around line 285, after the `Tab` type):
+  Add immediately before the `App()` function definition (after the `Tab` type at line 270, before `function StatRow`):
 
   ```tsx
   type Route = "landing" | "docs-creating-bots" | "docs-running-bots";
@@ -41,7 +41,7 @@
 
 - [ ] **Step 2: Add `currentRoute` state inside the `App()` function**
 
-  Add after the existing `useState` declarations (after the `theme` state around line 314):
+  Add after the `theme` useState block (after line 323, before `function toggleTheme`):
 
   ```tsx
   const [currentRoute, setCurrentRoute] = useState<Route>(
@@ -51,7 +51,7 @@
 
 - [ ] **Step 3: Add the `popstate` effect and `document.title` effect**
 
-  Add after the existing `useEffect` for session restore (after line ~422):
+  Add after the session-restore `useEffect` which closes with `}, []);` at line 422 (insert after line 422, before `const selectedMatch = useMemo`):
 
   ```tsx
   useEffect(() => {
@@ -311,11 +311,11 @@ return on_turn`}</code></pre>
   }
   ```
 
-  Note: this file needs `import React from "react"` at the top (or the JSX transform handles it — check `tsconfig.json` for `"jsx": "react-jsx"` which means no import needed).
+  No `import React` needed at the top. The project uses `"jsx": "react-jsx"` (confirmed in `apps/web/tsconfig.json`) which means automatic JSX transform is active — consistent with `App.tsx` which also has no React import.
 
-- [ ] **Step 2: Add the React import at the top of DocPage.tsx**
+- [ ] **Step 2: Verify the file starts correctly**
 
-  Check `apps/web/src/tsconfig.json` or `apps/web/tsconfig.json` for `"jsx"`. If it is `"react-jsx"` (Vite default), no import is needed. The file should start with no import (Vite/React 19 automatic JSX transform is used — consistent with how `App.tsx` has no React import).
+  The file should have no imports at the top (no React import needed). It only uses JSX and TypeScript types. Confirm first line is `interface DocPageProps {`.
 
 - [ ] **Step 3: Typecheck**
 
@@ -340,7 +340,7 @@ return on_turn`}</code></pre>
 
 - [ ] **Step 1: Append landing page and doc page CSS**
 
-  Add the following at the **end** of `apps/web/src/styles.css` (after line 902, after the existing `@media (max-width: 900px)` block):
+  Append to the **end** of `apps/web/src/styles.css` (after the `@media (max-width: 900px)` block that ends at line 901):
 
   ```css
   /* ══════════════════════════════
@@ -746,6 +746,8 @@ return on_turn`}</code></pre>
 
 - [ ] **Step 2: Replace the routing-unaware render block**
 
+  **Note on button text changes:** "Checking session..." → "Checking…" (shorter, fits the compact form) and "Create user account" → "Create account" (terser CTA). Both are intentional copy improvements for the new layout.
+
   The current code at lines 961–1010 is:
 
   ```tsx
@@ -870,7 +872,7 @@ return on_turn`}</code></pre>
               {error ? <span className="message error">{error}</span> : null}
               {message ? <span className="message success">{message}</span> : null}
               <form onSubmit={(e) => { e.preventDefault(); void handleLogin(); }}>
-                <div className="form-grid">
+                <div className="form-grid two-up">
                   <label>
                     <span>Email</span>
                     <input
@@ -992,6 +994,7 @@ No automated browser tests exist for this project. Verify visually using the dev
 - [ ] **Step 1: Push branch and open PR**
 
   ```bash
+  git checkout main
   git checkout -b feat/landing-page
   git push -u origin feat/landing-page
   gh pr create \
