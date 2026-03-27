@@ -1177,7 +1177,7 @@ export function App() {
                             <span>Linux x64 executable</span>
                             <input
                               type="file"
-                              accept=".bin,.out,.elf,.exe,application/octet-stream"
+                              accept=".bin,.out,.elf,application/octet-stream"
                               onChange={(event) => void handleBotArtifactSelected(event.target.files?.[0] ?? null)}
                             />
                           </label>
