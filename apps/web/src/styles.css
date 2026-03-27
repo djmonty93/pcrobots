@@ -925,8 +925,6 @@ select {
 }
 
 .landing-right {
-  position: sticky;
-  top: 0;
   flex: 0 0 45%;
   height: 100vh;
   display: flex;

@@ -351,6 +351,7 @@ export function App() {
       window.history.pushState(null, "", canonicalPath);
     }
     setCurrentRoute(route);
+    window.scrollTo(0, 0);
   }
 
   useEffect(() => {
