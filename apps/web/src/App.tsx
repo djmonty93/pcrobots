@@ -314,24 +314,24 @@ export function App() {
   // ── Routing ──────────────────────────────────────────────────────────────
   type Route = "home" | "docs-creating-bots" | "docs-running-bots";
 
-  function pathToRoute(path: string): Route {
+  function routeFromPathname(path: string): Route {
     if (path === "/docs/creating-bots") return "docs-creating-bots";
     if (path === "/docs/running-bots") return "docs-running-bots";
     return "home";
   }
 
   const [currentRoute, setCurrentRoute] = useState<Route>(() =>
-    pathToRoute(window.location.pathname)
+    routeFromPathname(window.location.pathname)
   );
 
   function navigate(path: string): void {
     window.history.pushState(null, "", path);
-    setCurrentRoute(pathToRoute(path));
+    setCurrentRoute(routeFromPathname(path));
   }
 
   useEffect(() => {
     function handlePopState() {
-      setCurrentRoute(pathToRoute(window.location.pathname));
+      setCurrentRoute(routeFromPathname(window.location.pathname));
     }
     window.addEventListener("popstate", handlePopState);
     return () => { window.removeEventListener("popstate", handlePopState); };
