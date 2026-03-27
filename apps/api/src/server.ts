@@ -477,7 +477,7 @@ function parseCreateBotInput(body: unknown): CreateBotInput {
   return { name, description, language, source };
 }
 
-function parseUpdateBotInput(body: unknown, existingLanguage: SupportedLanguage): UpdateBotInput {
+function parseUpdateBotInput(body: unknown): UpdateBotInput {
   if (!isRecord(body)) {
     badRequest("bot payload must be a JSON object");
   }
@@ -497,8 +497,7 @@ function parseUpdateBotInput(body: unknown, existingLanguage: SupportedLanguage)
       artifactBase64: artifact?.artifactBase64,
       artifactFileName: artifact?.artifactFileName,
       artifactSha256: artifact?.artifactSha256,
-      artifactSizeBytes: artifact?.artifactSizeBytes,
-      preserveExistingArtifact: !artifact && existingLanguage === "linux-x64-binary"
+      artifactSizeBytes: artifact?.artifactSizeBytes
     };
   }
 
@@ -1201,7 +1200,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       }
 
       const body = await readJsonBody(request);
-      const input = parseUpdateBotInput(body, existingBot.latestRevision.language);
+      const input = parseUpdateBotInput(body);
       sendJson(response, 200, await db.updateBot(segments[2], input));
       return;
     }

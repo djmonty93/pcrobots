@@ -740,8 +740,7 @@ export function App() {
             description: botForm.description,
             language: botForm.language,
             artifactBase64: botForm.artifactBase64 || undefined,
-            artifactFileName: botForm.artifactFileName || undefined,
-            preserveExistingArtifact: editingBotId ? botForm.preserveExistingArtifact && !botForm.artifactBase64 : undefined
+            artifactFileName: botForm.artifactFileName || undefined
           }
         : {
             name: botForm.name,

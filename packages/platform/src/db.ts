@@ -168,7 +168,6 @@ export interface UpdateBinaryBotInput extends BaseBotInput {
   artifactFileName?: string;
   artifactSha256?: string;
   artifactSizeBytes?: number;
-  preserveExistingArtifact?: boolean;
 }
 
 export type CreateBotInput =
@@ -1124,24 +1123,6 @@ export class Database {
         isBinaryLanguage(input.language) && !("artifactBase64" in input && input.artifactBase64);
 
       if (!isMetadataOnlyBinaryUpdate) {
-        if (isBinaryLanguage(input.language)) {
-          // Validate the previous revision exists before creating a new one.
-          const currentRevision = await client.query<{ language: SupportedLanguage }>(
-            `
-              SELECT language
-              FROM bot_revisions
-              WHERE bot_id = $1
-              ORDER BY version DESC
-              LIMIT 1
-            `,
-            [botId]
-          );
-          const previous = currentRevision.rows[0];
-          if (!previous || previous.language !== "linux-x64-binary") {
-            throw new Error(`Bot ${botId} requires a Linux x64 binary artifact upload`);
-          }
-        }
-
         const versionResult = await client.query<{ next_version: number }>(
           `
             SELECT COALESCE(MAX(version), 0) + 1 AS next_version
