@@ -150,7 +150,7 @@ A small credit line below the description, linking to the original:
 
 > Based on the original PCRobots by [PD Smith](https://www.pscs.co.uk/pcrobots/index.php) (early 1990s)
 
-Rendered as a single line of `--text-muted` text with the link styled in `--accent`. Opens in a new tab (`target="_blank" rel="noopener noreferrer"`).
+Rendered as a single line of `--text-dim` text (14px) with the link styled in `--accent2`. Opens in a new tab (`target="_blank" rel="noopener noreferrer"`).
 
 ### 5. Feature chips
 
@@ -181,7 +181,7 @@ Step indicators with numbered circles and brief labels:
 3. **Battle** — Run matches, climb ladder rankings, or compete in elimination tournaments
 
 ### 7. Doc links
-Two prominent text links using `--accent` colour with arrow:
+Two prominent text links using `--accent2` colour (see Accessibility section — `--accent` fails WCAG AA for normal text) with arrow:
 - `Bot creation guide →` — navigates to `/docs/creating-bots` via `history.pushState`
 - `Running a match →` — navigates to `/docs/running-bots` via `history.pushState`
 
@@ -342,6 +342,66 @@ A ladder is an ongoing ranked competition. Bots earn ratings based on wins and l
 ### Tournaments
 
 Tournaments run a full bracket in one go — round-robin, single-elimination, or double-elimination. Go to the **Compete** tab, create a tournament, add bots, and run all pending matches.
+
+---
+
+## Accessibility & Readability
+
+All new pages (landing page and doc pages) must meet **WCAG AA** contrast requirements and maintain comfortable reading sizes. The existing app theme tokens have two known contrast issues that affect the new pages:
+
+### Contrast audit of relevant tokens
+
+| Token | Dark value | Dark ratio on `--bg` | Light value | Light ratio on `--bg` | Pass AA? |
+|---|---|---|---|---|---|
+| `--text` | #f1f5f9 | ~15:1 | #0f172a | ~17:1 | ✅ both |
+| `--text-dim` | #c8d4e8 | ~9:1 | #334155 | ~9.6:1 | ✅ both |
+| `--text-muted` | #8b9db8 | ~7.4:1 | #64748b | ~4.4:1 | ⚠️ light fails at small sizes |
+| `--accent` | #6366f1 | ~4.25:1 | #6366f1 | ~4.1:1 | ❌ both fail for normal text |
+| `--accent2` | #818cf8 | ~6.7:1 | #4f46e5 | ~5.8:1 | ✅ both |
+
+### Rules for new pages
+
+**1. Text links must use `--accent2`, not `--accent`**
+
+`--accent` (#6366f1) falls below the 4.5:1 WCAG AA threshold for normal-weight text on both themes. All inline text links on the landing page and doc pages (`Bot creation guide →`, `Running a match →`, `← PCRobots`, cross-links, and the PD Smith attribution link) must use `color: var(--accent2)`.
+
+**2. Subdued text must use `--text-dim`, not `--text-muted`, for small text**
+
+`--text-muted` is acceptable for large text (≥18px) but fails on the light theme at the small sizes used in chips and attribution lines. The attribution line (14px) and `.landing-chip` labels (13px) must use `color: var(--text-dim)`.
+
+Update the `.landing-chip` definition in the spec accordingly:
+
+```css
+.landing-chip {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);  /* not --text-muted: fails WCAG AA on light theme at 13px */
+}
+```
+
+**3. Minimum font sizes**
+
+| Element | Minimum size |
+|---|---|
+| Body / prose text | 15px (matches existing app base) |
+| Doc page body paragraphs | 16px (longer reading passages benefit from slightly larger size) |
+| Code blocks | 14px |
+| Chip labels | 13px |
+| Attribution / meta lines | 14px |
+| Never below | 13px for any visible text |
+
+**4. Line length**
+
+Doc page prose is capped at 720px max-width. Lines should not exceed ~75 characters. This is enforced by the `max-width` constraint already in the spec.
+
+**5. Existing app pages**
+
+The existing authenticated app (`styles.css`) is not in scope for this task. However the same `--accent`/`--accent2` contrast issue applies to any links rendered inside the app shell. A follow-up task should audit and update link colours in `styles.css` to use `--accent2`; this is noted here for awareness but not required before shipping the landing page.
 
 ---
 
