@@ -697,35 +697,46 @@ function toScope(user: UserRecord): AccessScope {
   return { userId: user.id, role: user.role };
 }
 
-function extractBearerToken(request: IncomingMessage): string | null {
-  const header = request.headers.authorization;
-  if (!header) {
-    return null;
-  }
+function parseCookies(cookieHeader: string | undefined): Record<string, string> {
+  if (!cookieHeader) return {};
+  return Object.fromEntries(
+    cookieHeader.split(";").map((pair) => {
+      const [k, ...v] = pair.trim().split("=");
+      return [k.trim(), decodeURIComponent(v.join("="))];
+    })
+  );
+}
 
-  const [scheme, token] = header.split(/\s+/, 2);
-  if (!scheme || !token || scheme.toLowerCase() !== "bearer") {
-    return null;
-  }
+function buildSessionCookie(token: string, rememberMe: boolean): string {
+  const isProduction = process.env.NODE_ENV === "production";
+  const base = `pcrobots-session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/`;
+  const secure = isProduction ? "; Secure" : "";
+  const maxAge = rememberMe ? "; Max-Age=2592000" : "";
+  return `${base}${secure}${maxAge}`;
+}
 
-  return token.trim();
+function clearSessionCookie(): string {
+  const isProduction = process.env.NODE_ENV === "production";
+  const secure = isProduction ? "; Secure" : "";
+  return `pcrobots-session=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/${secure}`;
 }
 
 async function requireUser(request: IncomingMessage): Promise<{ token: string; user: UserRecord; scope: AccessScope }> {
-  const token = extractBearerToken(request);
+  const cookies = parseCookies(request.headers["cookie"]);
+  const token = cookies["pcrobots-session"];
   if (!token) {
     unauthorized("authentication required");
   }
 
-  const user = await db.getUserBySessionToken(token);
+  const user = await db.getUserBySessionToken(token!);
   if (!user) {
     unauthorized("invalid or expired session");
   }
 
   return {
-    token,
-    user,
-    scope: toScope(user)
+    token: token!,
+    user: user!,
+    scope: toScope(user!)
   };
 }
 
