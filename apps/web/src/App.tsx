@@ -385,11 +385,19 @@ function accumulateBotStats(buckets: BotStatsBucket[]) {
 }
 
 function getBotAggregateStats(bot: BotRecord) {
-  return accumulateBotStats(
-    bot.statsMode === "per-bot"
-      ? [bot.activeStats]
-      : bot.statsBuckets.filter((bucket) => bucket.scope === "revision")
+  if (bot.statsMode === "per-bot") {
+    return accumulateBotStats([bot.activeStats]);
+  }
+
+  const persistedRevisionBuckets = bot.statsBuckets.filter(
+    (bucket) => bucket.scope === "revision" && !bucket.id.startsWith("pending:")
   );
+  if (persistedRevisionBuckets.length > 0) {
+    return accumulateBotStats(persistedRevisionBuckets);
+  }
+
+  const aggregateBucket = bot.statsBuckets.find((bucket) => bucket.scope === "bot");
+  return accumulateBotStats(aggregateBucket ? [aggregateBucket] : [bot.activeStats]);
 }
 
 function calculatePercent(numerator: number, denominator: number): string {
