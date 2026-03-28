@@ -699,21 +699,21 @@ export function App() {
       }
 
       const current = totals.get(bot.ownerUserId) ?? createEmptyAggregateBotStats();
-      const next = summarizeOwnedBotPortfolio([bot]);
-      current.bots += next.bots;
-      current.matches += next.matches;
-      current.wins += next.wins;
-      current.losses += next.losses;
-      current.draws += next.draws;
-      current.shotsFired += next.shotsFired;
-      current.shotsLanded += next.shotsLanded;
-      current.directHits += next.directHits;
-      current.scans += next.scans;
-      current.kills += next.kills;
-      current.deaths += next.deaths;
-      current.damageGiven += next.damageGiven;
-      current.damageTaken += next.damageTaken;
-      current.collisions += next.collisions;
+      const stats = getBotAggregateStats(bot);
+      current.bots += 1;
+      current.matches += stats.matches;
+      current.wins += stats.wins;
+      current.losses += stats.losses;
+      current.draws += stats.draws;
+      current.shotsFired += stats.shotsFired;
+      current.shotsLanded += stats.shotsLanded;
+      current.directHits += stats.directHits;
+      current.scans += stats.scans;
+      current.kills += stats.kills;
+      current.deaths += stats.deaths;
+      current.damageGiven += stats.damageGiven;
+      current.damageTaken += stats.damageTaken;
+      current.collisions += stats.collisions;
       totals.set(bot.ownerUserId, current);
     }
 

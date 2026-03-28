@@ -775,6 +775,7 @@ async function upsertBotStatsBucket(
     damageGiven: number;
     damageTaken: number;
     collisions: number;
+    absolute?: boolean;
   }
 ): Promise<void> {
   await client.query(
@@ -809,19 +810,19 @@ async function upsertBotStatsBucket(
       DO UPDATE SET
         bot_revision_id = EXCLUDED.bot_revision_id,
         scope = EXCLUDED.scope,
-        matches = bot_stats.matches + EXCLUDED.matches,
-        wins = bot_stats.wins + EXCLUDED.wins,
-        losses = bot_stats.losses + EXCLUDED.losses,
-        draws = bot_stats.draws + EXCLUDED.draws,
-        shots_fired = bot_stats.shots_fired + EXCLUDED.shots_fired,
-        shots_landed = bot_stats.shots_landed + EXCLUDED.shots_landed,
-        direct_hits = bot_stats.direct_hits + EXCLUDED.direct_hits,
-        scans = bot_stats.scans + EXCLUDED.scans,
-        kills = bot_stats.kills + EXCLUDED.kills,
-        deaths = bot_stats.deaths + EXCLUDED.deaths,
-        damage_given = bot_stats.damage_given + EXCLUDED.damage_given,
-        damage_taken = bot_stats.damage_taken + EXCLUDED.damage_taken,
-        collisions = bot_stats.collisions + EXCLUDED.collisions,
+        matches = CASE WHEN $19 THEN EXCLUDED.matches ELSE bot_stats.matches + EXCLUDED.matches END,
+        wins = CASE WHEN $19 THEN EXCLUDED.wins ELSE bot_stats.wins + EXCLUDED.wins END,
+        losses = CASE WHEN $19 THEN EXCLUDED.losses ELSE bot_stats.losses + EXCLUDED.losses END,
+        draws = CASE WHEN $19 THEN EXCLUDED.draws ELSE bot_stats.draws + EXCLUDED.draws END,
+        shots_fired = CASE WHEN $19 THEN EXCLUDED.shots_fired ELSE bot_stats.shots_fired + EXCLUDED.shots_fired END,
+        shots_landed = CASE WHEN $19 THEN EXCLUDED.shots_landed ELSE bot_stats.shots_landed + EXCLUDED.shots_landed END,
+        direct_hits = CASE WHEN $19 THEN EXCLUDED.direct_hits ELSE bot_stats.direct_hits + EXCLUDED.direct_hits END,
+        scans = CASE WHEN $19 THEN EXCLUDED.scans ELSE bot_stats.scans + EXCLUDED.scans END,
+        kills = CASE WHEN $19 THEN EXCLUDED.kills ELSE bot_stats.kills + EXCLUDED.kills END,
+        deaths = CASE WHEN $19 THEN EXCLUDED.deaths ELSE bot_stats.deaths + EXCLUDED.deaths END,
+        damage_given = CASE WHEN $19 THEN EXCLUDED.damage_given ELSE bot_stats.damage_given + EXCLUDED.damage_given END,
+        damage_taken = CASE WHEN $19 THEN EXCLUDED.damage_taken ELSE bot_stats.damage_taken + EXCLUDED.damage_taken END,
+        collisions = CASE WHEN $19 THEN EXCLUDED.collisions ELSE bot_stats.collisions + EXCLUDED.collisions END,
         last_match_at = NOW(),
         updated_at = NOW()
     `,
@@ -843,7 +844,8 @@ async function upsertBotStatsBucket(
       input.deaths,
       input.damageGiven,
       input.damageTaken,
-      input.collisions
+      input.collisions,
+      input.absolute ?? false
     ]
   );
 }
@@ -924,7 +926,8 @@ async function ensurePerBotAggregateStatsBucket(client: PoolClient, botId: strin
     deaths: row.deaths,
     damageGiven: row.damage_given,
     damageTaken: row.damage_taken,
-    collisions: row.collisions
+    collisions: row.collisions,
+    absolute: true
   });
 }
 
@@ -1331,52 +1334,54 @@ export class Database {
   }
 
   async listBots(scope?: AccessScope): Promise<BotRecord[]> {
-    const params: unknown[] = [];
-    const whereClause = isAdmin(scope) || !scope ? "" : "WHERE b.owner_user_id = $1";
-    if (scope && !isAdmin(scope)) {
-      params.push(scope.userId);
-    }
+    return withTransaction(this.pool, async (client) => {
+      const params: unknown[] = [];
+      const whereClause = isAdmin(scope) || !scope ? "" : "WHERE b.owner_user_id = $1";
+      if (scope && !isAdmin(scope)) {
+        params.push(scope.userId);
+      }
 
-    const result = await this.pool.query<BotRow>(`
-      SELECT
-        b.id,
-        b.owner_user_id,
-        u.email AS owner_email,
-        b.name,
-        b.description,
-        b.stats_mode,
-        b.created_at,
-        b.updated_at,
-        br.id AS revision_id,
-        br.language AS revision_language,
-        br.source AS revision_source,
-        br.artifact_filename AS revision_artifact_filename,
-        br.artifact_sha256 AS revision_artifact_sha256,
-        br.artifact_size_bytes AS revision_artifact_size_bytes,
-        br.version AS revision_version,
-        br.created_at AS revision_created_at
-      FROM bots AS b
-      LEFT JOIN users AS u ON u.id = b.owner_user_id
-      JOIN LATERAL (
-        SELECT id, language, source, artifact_filename, artifact_sha256, artifact_size_bytes, version, created_at
-        FROM bot_revisions
-        WHERE bot_id = b.id
-        ORDER BY version DESC
-        LIMIT 1
-      ) AS br ON TRUE
-      ${whereClause}
-      ORDER BY b.created_at DESC
-    `, params);
+      const result = await client.query<BotRow>(`
+        SELECT
+          b.id,
+          b.owner_user_id,
+          u.email AS owner_email,
+          b.name,
+          b.description,
+          b.stats_mode,
+          b.created_at,
+          b.updated_at,
+          br.id AS revision_id,
+          br.language AS revision_language,
+          br.source AS revision_source,
+          br.artifact_filename AS revision_artifact_filename,
+          br.artifact_sha256 AS revision_artifact_sha256,
+          br.artifact_size_bytes AS revision_artifact_size_bytes,
+          br.version AS revision_version,
+          br.created_at AS revision_created_at
+        FROM bots AS b
+        LEFT JOIN users AS u ON u.id = b.owner_user_id
+        JOIN LATERAL (
+          SELECT id, language, source, artifact_filename, artifact_sha256, artifact_size_bytes, version, created_at
+          FROM bot_revisions
+          WHERE bot_id = b.id
+          ORDER BY version DESC
+          LIMIT 1
+        ) AS br ON TRUE
+        ${whereClause}
+        ORDER BY b.created_at DESC
+      `, params);
 
-    const statsRows = await loadBotStatsRows(this.pool, result.rows.map((row) => row.id));
-    const statsByBotId = new Map<string, BotStatsRow[]>();
-    for (const row of statsRows) {
-      const list = statsByBotId.get(row.bot_id) ?? [];
-      list.push(row);
-      statsByBotId.set(row.bot_id, list);
-    }
+      const statsRows = await loadBotStatsRows(client, result.rows.map((row) => row.id));
+      const statsByBotId = new Map<string, BotStatsRow[]>();
+      for (const row of statsRows) {
+        const list = statsByBotId.get(row.bot_id) ?? [];
+        list.push(row);
+        statsByBotId.set(row.bot_id, list);
+      }
 
-    return result.rows.map((row) => mapBotRow(row, statsByBotId.get(row.id) ?? []));
+      return result.rows.map((row) => mapBotRow(row, statsByBotId.get(row.id) ?? []));
+    });
   }
 
   async getBot(botId: string, scope?: AccessScope): Promise<BotRecord | null> {
@@ -2105,6 +2110,15 @@ export class Database {
       return;
     }
 
+    if (!Array.isArray(events)) {
+      console.warn(`[bot-stats] updateBotStatsForCompletedMatch: expected events array for match ${matchId}, got ${typeof events}`);
+    }
+    const safeEvents = Array.isArray(events) ? (events as MatchEvent[]) : [];
+
+    if (result !== null && typeof result !== "object") {
+      console.warn(`[bot-stats] updateBotStatsForCompletedMatch: unexpected result type for match ${matchId}: ${typeof result}`);
+    }
+
     const deltas = summarizeCompletedMatchStats({
       participants: participantResult.rows.map((row) => ({
         id: row.participant_id,
@@ -2114,7 +2128,7 @@ export class Database {
         teamId: row.team_id
       })),
       result: (result as MatchResult | null) ?? null,
-      events: Array.isArray(events) ? (events as MatchEvent[]) : []
+      events: safeEvents
     });
 
     const statsModeByBotId = new Map(participantResult.rows.map((row) => [row.bot_id, row.stats_mode]));

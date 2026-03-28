@@ -499,7 +499,7 @@ function parseUpdateBotInput(body: unknown): UpdateBotInput {
   if (name.length > 200) badRequest("name must not exceed 200 characters");
   const description = typeof body.description === "string" ? body.description.trim() : "";
   if (description.length > 2000) badRequest("description must not exceed 2000 characters");
-  const statsMode = expectBotStatsMode(body.statsMode);
+  const statsMode = body.statsMode !== undefined ? expectBotStatsMode(body.statsMode) : undefined;
   const language = expectLanguage(body.language);
 
   if (language === "linux-x64-binary") {

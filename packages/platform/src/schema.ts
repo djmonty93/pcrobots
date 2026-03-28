@@ -87,17 +87,6 @@ CREATE TABLE IF NOT EXISTS bot_stats (
 
 ALTER TABLE bot_stats DROP CONSTRAINT IF EXISTS bot_stats_scope_check;
 ALTER TABLE bot_stats ADD CONSTRAINT bot_stats_scope_check CHECK (scope IN ('bot', 'revision'));
-ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS scope_key TEXT NOT NULL DEFAULT 'bot';
-ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS shots_fired INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS shots_landed INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS direct_hits INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS scans INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS kills INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS deaths INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS damage_given INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS damage_taken INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS collisions INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS last_match_at TIMESTAMPTZ;
 
 CREATE UNIQUE INDEX IF NOT EXISTS bot_stats_bot_scope_key_idx ON bot_stats(bot_id, scope_key);
 CREATE INDEX IF NOT EXISTS bot_stats_bot_id_idx ON bot_stats(bot_id, updated_at DESC);
@@ -244,6 +233,7 @@ WHERE mp.bot_revision_id = br.id
   AND mp.stats_mode IS NULL;
 
 ALTER TABLE match_participants ALTER COLUMN stats_mode SET DEFAULT 'per-bot';
+ALTER TABLE match_participants ALTER COLUMN stats_mode SET NOT NULL;
 ALTER TABLE match_participants DROP CONSTRAINT IF EXISTS match_participants_stats_mode_check;
 ALTER TABLE match_participants ADD CONSTRAINT match_participants_stats_mode_check CHECK (stats_mode IN ('per-bot', 'per-variant', 'reset-on-variant'));
 
