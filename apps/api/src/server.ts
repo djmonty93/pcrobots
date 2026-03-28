@@ -624,14 +624,19 @@ function parseCreateTournamentInput(body: unknown): CreateTournamentInput {
   };
 }
 
-function parseLoginRequest(body: unknown): { email: string; password: string } {
+function parseLoginRequest(body: unknown): { email: string; password: string; rememberMe: boolean } {
   if (!isRecord(body)) {
     badRequest("login payload must be a JSON object");
   }
 
+  const rememberMe = typeof (body as Record<string, unknown>).rememberMe === "boolean"
+    ? (body as Record<string, unknown>).rememberMe as boolean
+    : false;
+
   return {
     email: expectString(body.email, "email"),
-    password: expectString(body.password, "password")
+    password: expectString(body.password, "password"),
+    rememberMe
   };
 }
 
@@ -991,9 +996,11 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         unauthorized("invalid email or password");
       }
 
-      const session = await db.createSession(user.id);
+      const ttlDays = credentials.rememberMe ? 30 : 1;
+      const session = await db.createSession(user!.id, ttlDays);
       clearAuthAttempts(rateLimitKey);
-      sendJson(response, 200, session);
+      response.setHeader("Set-Cookie", buildSessionCookie(session.token, credentials.rememberMe));
+      sendJson(response, 200, { user: session.user });
       return;
     }
 
