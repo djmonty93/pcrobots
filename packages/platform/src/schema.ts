@@ -229,11 +229,23 @@ CREATE TABLE IF NOT EXISTS match_participants (
   id TEXT PRIMARY KEY,
   match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
   bot_revision_id TEXT NOT NULL REFERENCES bot_revisions(id),
+  stats_mode TEXT,
   team_id TEXT NOT NULL,
   slot INTEGER NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (match_id, slot)
 );
+
+UPDATE match_participants AS mp
+SET stats_mode = b.stats_mode
+FROM bot_revisions AS br
+JOIN bots AS b ON b.id = br.bot_id
+WHERE mp.bot_revision_id = br.id
+  AND mp.stats_mode IS NULL;
+
+ALTER TABLE match_participants ALTER COLUMN stats_mode SET DEFAULT 'per-bot';
+ALTER TABLE match_participants DROP CONSTRAINT IF EXISTS match_participants_stats_mode_check;
+ALTER TABLE match_participants ADD CONSTRAINT match_participants_stats_mode_check CHECK (stats_mode IN ('per-bot', 'per-variant', 'reset-on-variant'));
 
 CREATE INDEX IF NOT EXISTS match_participants_match_id_idx ON match_participants(match_id, slot);
 `;

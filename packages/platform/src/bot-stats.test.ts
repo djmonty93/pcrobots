@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { summarizeCompletedMatchStats, calculateRate } from "./bot-stats.js";
+import type { PoolClient } from "pg";
+
+import {
+  summarizeCompletedMatchStats,
+  calculateRate,
+  createBotStatsWritePlans,
+  shouldResetBotStatsOnUpdate
+} from "./bot-stats.js";
+import { Database } from "./db.js";
 
 test("summarizeCompletedMatchStats counts wins, shots, hits, damage, kills, and deaths", () => {
   const [alpha, beta] = summarizeCompletedMatchStats({
@@ -94,3 +102,102 @@ test("calculateRate rounds to one decimal place", () => {
   assert.equal(calculateRate(2, 3), 66.7);
 });
 
+test("createBotStatsWritePlans always writes a bot aggregate and adds revision buckets only when needed", () => {
+  const delta = {
+    botId: "bot-1",
+    botRevisionId: "rev-2",
+    revisionVersion: 2,
+    matches: 1,
+    wins: 1,
+    losses: 0,
+    draws: 0,
+    shotsFired: 2,
+    shotsLanded: 1,
+    directHits: 1,
+    scans: 3,
+    kills: 1,
+    deaths: 0,
+    damageGiven: 10,
+    damageTaken: 4,
+    collisions: 0
+  };
+
+  assert.deepEqual(createBotStatsWritePlans("per-bot", delta), [
+    {
+      botId: "bot-1",
+      botRevisionId: null,
+      scope: "bot",
+      scopeKey: "bot",
+      matches: 1,
+      wins: 1,
+      losses: 0,
+      draws: 0,
+      shotsFired: 2,
+      shotsLanded: 1,
+      directHits: 1,
+      scans: 3,
+      kills: 1,
+      deaths: 0,
+      damageGiven: 10,
+      damageTaken: 4,
+      collisions: 0
+    }
+  ]);
+
+  assert.deepEqual(createBotStatsWritePlans("per-variant", delta).map((entry) => entry.scopeKey), ["bot", "rev-2"]);
+  assert.deepEqual(createBotStatsWritePlans("reset-on-variant", delta).map((entry) => entry.scopeKey), ["bot", "rev-2"]);
+});
+
+test("shouldResetBotStatsOnUpdate only resets for reset-on-variant when a new revision is created", () => {
+  assert.equal(shouldResetBotStatsOnUpdate("per-bot", true), false);
+  assert.equal(shouldResetBotStatsOnUpdate("per-variant", true), false);
+  assert.equal(shouldResetBotStatsOnUpdate("reset-on-variant", false), false);
+  assert.equal(shouldResetBotStatsOnUpdate("reset-on-variant", true), true);
+});
+
+test("updateBotStatsForCompletedMatch honors the snapshotted participant stats mode", async () => {
+  const db = Object.create(Database.prototype) as Record<string, unknown>;
+  const insertCalls: unknown[][] = [];
+
+  const fakeClient = {
+    async query<T>(sql: string, params: unknown[]) {
+      if (sql.includes("FROM match_participants AS mp")) {
+        return {
+          rows: [
+            {
+              participant_id: "participant-1",
+              bot_id: "bot-1",
+              bot_revision_id: "rev-1",
+              revision_version: 1,
+              team_id: "A",
+              stats_mode: "per-variant"
+            }
+          ] as T[],
+          rowCount: 1
+        };
+      }
+
+      if (sql.includes("INSERT INTO bot_stats")) {
+        insertCalls.push(params);
+        return { rows: [] as T[], rowCount: 1 };
+      }
+
+      throw new Error(`Unexpected query in test: ${sql}`);
+    }
+  } as unknown as PoolClient;
+
+  await (db.updateBotStatsForCompletedMatch as (
+    client: PoolClient,
+    matchId: string,
+    result: unknown,
+    events: unknown
+  ) => Promise<void>)(
+    fakeClient,
+    "match-1",
+    { finished: true, winnerRobotId: "participant-1", winnerTeamId: "A", reason: "last_robot" },
+    []
+  );
+
+  assert.equal(insertCalls.length, 2);
+  assert.deepEqual(insertCalls.map((params) => params[4]), ["bot", "rev-1"]);
+});

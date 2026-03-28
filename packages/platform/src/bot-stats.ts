@@ -33,6 +33,13 @@ export interface BotStatsDelta extends BotStatsCounters {
   revisionVersion: number;
 }
 
+export interface BotStatsWritePlan extends BotStatsCounters {
+  botId: string;
+  botRevisionId: string | null;
+  scope: BotStatsScope;
+  scopeKey: string;
+}
+
 const damagingShellOutcomes = new Set(["close_blast", "near_miss", "direct_hit"]);
 
 export function createEmptyBotStatsCounters(): BotStatsCounters {
@@ -189,3 +196,55 @@ export function calculateRate(numerator: number, denominator: number): number {
   return Math.round((numerator / denominator) * 1000) / 10;
 }
 
+export function shouldResetBotStatsOnUpdate(statsMode: BotStatsMode, createdNewVariant: boolean): boolean {
+  return statsMode === "reset-on-variant" && createdNewVariant;
+}
+
+export function createBotStatsWritePlans(statsMode: BotStatsMode, delta: BotStatsDelta): BotStatsWritePlan[] {
+  const aggregatePlan: BotStatsWritePlan = {
+    botId: delta.botId,
+    botRevisionId: null,
+    scope: "bot",
+    scopeKey: "bot",
+    matches: delta.matches,
+    wins: delta.wins,
+    losses: delta.losses,
+    draws: delta.draws,
+    shotsFired: delta.shotsFired,
+    shotsLanded: delta.shotsLanded,
+    directHits: delta.directHits,
+    scans: delta.scans,
+    kills: delta.kills,
+    deaths: delta.deaths,
+    damageGiven: delta.damageGiven,
+    damageTaken: delta.damageTaken,
+    collisions: delta.collisions
+  };
+
+  if (statsMode === "per-bot") {
+    return [aggregatePlan];
+  }
+
+  return [
+    aggregatePlan,
+    {
+      botId: delta.botId,
+      botRevisionId: delta.botRevisionId,
+      scope: "revision",
+      scopeKey: delta.botRevisionId,
+      matches: delta.matches,
+      wins: delta.wins,
+      losses: delta.losses,
+      draws: delta.draws,
+      shotsFired: delta.shotsFired,
+      shotsLanded: delta.shotsLanded,
+      directHits: delta.directHits,
+      scans: delta.scans,
+      kills: delta.kills,
+      deaths: delta.deaths,
+      damageGiven: delta.damageGiven,
+      damageTaken: delta.damageTaken,
+      collisions: delta.collisions
+    }
+  ];
+}

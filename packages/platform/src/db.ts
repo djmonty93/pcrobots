@@ -5,7 +5,9 @@ import { type MatchEvent, type MatchResult } from "@pcrobots/engine";
 import { bootstrapSql } from "./schema.js";
 import {
   calculateRate,
+  createBotStatsWritePlans,
   createEmptyBotStatsCounters,
+  shouldResetBotStatsOnUpdate,
   summarizeCompletedMatchStats,
   type BotStatsMode,
   type BotStatsScope
@@ -753,6 +755,179 @@ async function loadBotStatsRows(queryable: Queryable, botIds: string[]): Promise
   return result.rows;
 }
 
+async function upsertBotStatsBucket(
+  client: PoolClient,
+  input: {
+    botId: string;
+    botRevisionId: string | null;
+    scope: BotStatsScope;
+    scopeKey: string;
+    matches: number;
+    wins: number;
+    losses: number;
+    draws: number;
+    shotsFired: number;
+    shotsLanded: number;
+    directHits: number;
+    scans: number;
+    kills: number;
+    deaths: number;
+    damageGiven: number;
+    damageTaken: number;
+    collisions: number;
+  }
+): Promise<void> {
+  await client.query(
+    `
+      INSERT INTO bot_stats (
+        id,
+        bot_id,
+        bot_revision_id,
+        scope,
+        scope_key,
+        matches,
+        wins,
+        losses,
+        draws,
+        shots_fired,
+        shots_landed,
+        direct_hits,
+        scans,
+        kills,
+        deaths,
+        damage_given,
+        damage_taken,
+        collisions,
+        last_match_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8, $9,
+        $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW()
+      )
+      ON CONFLICT (bot_id, scope_key)
+      DO UPDATE SET
+        bot_revision_id = EXCLUDED.bot_revision_id,
+        scope = EXCLUDED.scope,
+        matches = bot_stats.matches + EXCLUDED.matches,
+        wins = bot_stats.wins + EXCLUDED.wins,
+        losses = bot_stats.losses + EXCLUDED.losses,
+        draws = bot_stats.draws + EXCLUDED.draws,
+        shots_fired = bot_stats.shots_fired + EXCLUDED.shots_fired,
+        shots_landed = bot_stats.shots_landed + EXCLUDED.shots_landed,
+        direct_hits = bot_stats.direct_hits + EXCLUDED.direct_hits,
+        scans = bot_stats.scans + EXCLUDED.scans,
+        kills = bot_stats.kills + EXCLUDED.kills,
+        deaths = bot_stats.deaths + EXCLUDED.deaths,
+        damage_given = bot_stats.damage_given + EXCLUDED.damage_given,
+        damage_taken = bot_stats.damage_taken + EXCLUDED.damage_taken,
+        collisions = bot_stats.collisions + EXCLUDED.collisions,
+        last_match_at = NOW(),
+        updated_at = NOW()
+    `,
+    [
+      randomUUID(),
+      input.botId,
+      input.botRevisionId,
+      input.scope,
+      input.scopeKey,
+      input.matches,
+      input.wins,
+      input.losses,
+      input.draws,
+      input.shotsFired,
+      input.shotsLanded,
+      input.directHits,
+      input.scans,
+      input.kills,
+      input.deaths,
+      input.damageGiven,
+      input.damageTaken,
+      input.collisions
+    ]
+  );
+}
+
+async function ensurePerBotAggregateStatsBucket(client: PoolClient, botId: string): Promise<void> {
+  const existingAggregate = await client.query<{ id: string }>(
+    `
+      SELECT id
+      FROM bot_stats
+      WHERE bot_id = $1
+        AND scope_key = 'bot'
+      LIMIT 1
+    `,
+    [botId]
+  );
+
+  if ((existingAggregate.rowCount ?? 0) > 0) {
+    return;
+  }
+
+  const totals = await client.query<{
+    bot_revision_id: string | null;
+    matches: number;
+    wins: number;
+    losses: number;
+    draws: number;
+    shots_fired: number;
+    shots_landed: number;
+    direct_hits: number;
+    scans: number;
+    kills: number;
+    deaths: number;
+    damage_given: number;
+    damage_taken: number;
+    collisions: number;
+  }>(
+    `
+      SELECT
+        MAX(bot_revision_id) AS bot_revision_id,
+        COALESCE(SUM(matches), 0)::integer AS matches,
+        COALESCE(SUM(wins), 0)::integer AS wins,
+        COALESCE(SUM(losses), 0)::integer AS losses,
+        COALESCE(SUM(draws), 0)::integer AS draws,
+        COALESCE(SUM(shots_fired), 0)::integer AS shots_fired,
+        COALESCE(SUM(shots_landed), 0)::integer AS shots_landed,
+        COALESCE(SUM(direct_hits), 0)::integer AS direct_hits,
+        COALESCE(SUM(scans), 0)::integer AS scans,
+        COALESCE(SUM(kills), 0)::integer AS kills,
+        COALESCE(SUM(deaths), 0)::integer AS deaths,
+        COALESCE(SUM(damage_given), 0)::integer AS damage_given,
+        COALESCE(SUM(damage_taken), 0)::integer AS damage_taken,
+        COALESCE(SUM(collisions), 0)::integer AS collisions
+      FROM bot_stats
+      WHERE bot_id = $1
+    `,
+    [botId]
+  );
+
+  const row = totals.rows[0];
+  if (!row || row.matches <= 0) {
+    return;
+  }
+
+  await upsertBotStatsBucket(client, {
+    botId,
+    botRevisionId: null,
+    scope: "bot",
+    scopeKey: "bot",
+    matches: row.matches,
+    wins: row.wins,
+    losses: row.losses,
+    draws: row.draws,
+    shotsFired: row.shots_fired,
+    shotsLanded: row.shots_landed,
+    directHits: row.direct_hits,
+    scans: row.scans,
+    kills: row.kills,
+    deaths: row.deaths,
+    damageGiven: row.damage_given,
+    damageTaken: row.damage_taken,
+    collisions: row.collisions
+  });
+}
+
 async function withTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
 
@@ -1360,10 +1535,11 @@ export class Database {
         await insertBotRevision(client, botId, versionResult.rows[0].next_version, input);
       }
 
-      const statsModeChanged = nextStatsMode !== currentBot.stats_mode;
-      const shouldResetForNewVariant = nextStatsMode === "reset-on-variant" && !isMetadataOnlyBinaryUpdate;
-      if (statsModeChanged || shouldResetForNewVariant) {
+      const shouldResetForNewVariant = shouldResetBotStatsOnUpdate(nextStatsMode, !isMetadataOnlyBinaryUpdate);
+      if (shouldResetForNewVariant) {
         await client.query(`DELETE FROM bot_stats WHERE bot_id = $1`, [botId]);
+      } else if (nextStatsMode === "per-bot") {
+        await ensurePerBotAggregateStatsBucket(client, botId);
       }
     });
 
@@ -1759,13 +1935,20 @@ export class Database {
         const participantId = randomUUID();
         const botRevisionId = participant.botRevisionId ?? (await this.resolveLatestBotRevisionId(client, participant.botId));
 
-        await client.query(
+        const insertParticipantResult = await client.query(
           `
-            INSERT INTO match_participants (id, match_id, bot_revision_id, team_id, slot)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO match_participants (id, match_id, bot_revision_id, stats_mode, team_id, slot)
+            SELECT $1, $2, $3, b.stats_mode, $4, $5
+            FROM bot_revisions AS br
+            JOIN bots AS b ON b.id = br.bot_id
+            WHERE br.id = $3
           `,
           [participantId, createdMatchId, botRevisionId, participant.teamId, index]
         );
+
+        if ((insertParticipantResult.rowCount ?? 0) === 0) {
+          throw new Error(`Bot revision ${botRevisionId} was not found while creating match ${createdMatchId}`);
+        }
       }
 
       return createdMatchId;
@@ -1908,7 +2091,7 @@ export class Database {
           mp.bot_revision_id,
           br.version AS revision_version,
           mp.team_id,
-          b.stats_mode
+          COALESCE(mp.stats_mode, b.stats_mode) AS stats_mode
         FROM match_participants AS mp
         JOIN bot_revisions AS br ON br.id = mp.bot_revision_id
         JOIN bots AS b ON b.id = br.bot_id
@@ -1938,78 +2121,9 @@ export class Database {
 
     for (const delta of deltas) {
       const statsMode = statsModeByBotId.get(delta.botId) ?? "per-bot";
-      const scope: BotStatsScope = statsMode === "per-bot" ? "bot" : "revision";
-      const scopeKey = scope === "bot" ? "bot" : delta.botRevisionId;
-
-      await client.query(
-        `
-          INSERT INTO bot_stats (
-            id,
-            bot_id,
-            bot_revision_id,
-            scope,
-            scope_key,
-            matches,
-            wins,
-            losses,
-            draws,
-            shots_fired,
-            shots_landed,
-            direct_hits,
-            scans,
-            kills,
-            deaths,
-            damage_given,
-            damage_taken,
-            collisions,
-            last_match_at
-          )
-          VALUES (
-            $1, $2, $3, $4, $5,
-            $6, $7, $8, $9,
-            $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW()
-          )
-          ON CONFLICT (bot_id, scope_key)
-          DO UPDATE SET
-            bot_revision_id = EXCLUDED.bot_revision_id,
-            scope = EXCLUDED.scope,
-            matches = bot_stats.matches + EXCLUDED.matches,
-            wins = bot_stats.wins + EXCLUDED.wins,
-            losses = bot_stats.losses + EXCLUDED.losses,
-            draws = bot_stats.draws + EXCLUDED.draws,
-            shots_fired = bot_stats.shots_fired + EXCLUDED.shots_fired,
-            shots_landed = bot_stats.shots_landed + EXCLUDED.shots_landed,
-            direct_hits = bot_stats.direct_hits + EXCLUDED.direct_hits,
-            scans = bot_stats.scans + EXCLUDED.scans,
-            kills = bot_stats.kills + EXCLUDED.kills,
-            deaths = bot_stats.deaths + EXCLUDED.deaths,
-            damage_given = bot_stats.damage_given + EXCLUDED.damage_given,
-            damage_taken = bot_stats.damage_taken + EXCLUDED.damage_taken,
-            collisions = bot_stats.collisions + EXCLUDED.collisions,
-            last_match_at = NOW(),
-            updated_at = NOW()
-        `,
-        [
-          randomUUID(),
-          delta.botId,
-          scope === "bot" ? null : delta.botRevisionId,
-          scope,
-          scopeKey,
-          delta.matches,
-          delta.wins,
-          delta.losses,
-          delta.draws,
-          delta.shotsFired,
-          delta.shotsLanded,
-          delta.directHits,
-          delta.scans,
-          delta.kills,
-          delta.deaths,
-          delta.damageGiven,
-          delta.damageTaken,
-          delta.collisions
-        ]
-      );
+      for (const plan of createBotStatsWritePlans(statsMode, delta)) {
+        await upsertBotStatsBucket(client, plan);
+      }
     }
   }
 
