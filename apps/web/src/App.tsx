@@ -28,6 +28,8 @@ import {
   updateBot,
   updateUser,
   type ArenaRecord,
+  type BotStatsBucket,
+  type BotStatsMode,
   type BotRecord,
   type LadderRecord,
   type MatchMode,
@@ -81,6 +83,7 @@ return on_turn
 type BotFormState = {
   name: string;
   description: string;
+  statsMode: BotStatsMode;
   language: SupportedLanguage;
   source: string;
   artifactBase64: string;
@@ -113,6 +116,7 @@ function createInitialBotState() {
   return {
     name: "Scout Alpha",
     description: "First browser-authored bot",
+    statsMode: "per-bot" as BotStatsMode,
     language: "javascript" as SupportedLanguage,
     source: defaultBotTemplates.javascript,
     artifactBase64: "",
@@ -307,6 +311,120 @@ function StatRow(props: { chips: Array<{ label: string; value: number | string }
       ))}
     </div>
   );
+}
+
+function getBotStatsModeLabel(statsMode: BotStatsMode): string {
+  switch (statsMode) {
+    case "per-variant":
+      return "Each variant separately";
+    case "reset-on-variant":
+      return "Reset on new variant";
+    default:
+      return "All variants together";
+  }
+}
+
+type AggregateBotStats = {
+  bots: number;
+  matches: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  shotsFired: number;
+  shotsLanded: number;
+  directHits: number;
+  scans: number;
+  kills: number;
+  deaths: number;
+  damageGiven: number;
+  damageTaken: number;
+  collisions: number;
+};
+
+function createEmptyAggregateBotStats(): AggregateBotStats {
+  return {
+    bots: 0,
+    matches: 0,
+    wins: 0,
+    losses: 0,
+    draws: 0,
+    shotsFired: 0,
+    shotsLanded: 0,
+    directHits: 0,
+    scans: 0,
+    kills: 0,
+    deaths: 0,
+    damageGiven: 0,
+    damageTaken: 0,
+    collisions: 0
+  };
+}
+
+function accumulateBotStats(buckets: BotStatsBucket[]) {
+  return buckets.reduce(
+    (totals, bucket) => ({
+      bots: totals.bots,
+      matches: totals.matches + bucket.matches,
+      wins: totals.wins + bucket.wins,
+      losses: totals.losses + bucket.losses,
+      draws: totals.draws + bucket.draws,
+      shotsFired: totals.shotsFired + bucket.shotsFired,
+      shotsLanded: totals.shotsLanded + bucket.shotsLanded,
+      directHits: totals.directHits + bucket.directHits,
+      scans: totals.scans + bucket.scans,
+      damageGiven: totals.damageGiven + bucket.damageGiven,
+      damageTaken: totals.damageTaken + bucket.damageTaken,
+      kills: totals.kills + bucket.kills,
+      deaths: totals.deaths + bucket.deaths,
+      collisions: totals.collisions + bucket.collisions
+    }),
+    createEmptyAggregateBotStats()
+  );
+}
+
+function getBotAggregateStats(bot: BotRecord) {
+  if (bot.statsMode === "per-bot") {
+    return accumulateBotStats([bot.activeStats]);
+  }
+
+  const persistedRevisionBuckets = bot.statsBuckets.filter(
+    (bucket) => bucket.scope === "revision" && !bucket.id.startsWith("pending:")
+  );
+  if (persistedRevisionBuckets.length > 0) {
+    return accumulateBotStats(persistedRevisionBuckets);
+  }
+
+  const aggregateBucket = bot.statsBuckets.find((bucket) => bucket.scope === "bot");
+  return accumulateBotStats(aggregateBucket ? [aggregateBucket] : [bot.activeStats]);
+}
+
+function calculatePercent(numerator: number, denominator: number): string {
+  if (denominator <= 0) {
+    return "0%";
+  }
+
+  return `${Math.round((numerator / denominator) * 1000) / 10}%`;
+}
+
+function summarizeOwnedBotPortfolio(bots: BotRecord[]): AggregateBotStats {
+  return bots.reduce((totals, bot) => {
+    const stats = getBotAggregateStats(bot);
+    totals.bots += 1;
+    totals.matches += stats.matches;
+    totals.wins += stats.wins;
+    totals.losses += stats.losses;
+    totals.draws += stats.draws;
+    totals.shotsFired += stats.shotsFired;
+    totals.shotsLanded += stats.shotsLanded;
+    totals.directHits += stats.directHits;
+    totals.scans += stats.scans;
+    totals.kills += stats.kills;
+    totals.deaths += stats.deaths;
+    totals.damageGiven += stats.damageGiven;
+    totals.damageTaken += stats.damageTaken;
+    totals.collisions += stats.collisions;
+    return totals;
+  }, createEmptyAggregateBotStats());
 }
 
 export function App() {
@@ -563,6 +681,43 @@ export function App() {
 
     return counts;
   }, [arenas, bots, ladders, matches, tournaments]);
+  const botStatsByOwner = useMemo(() => {
+    const totals = new Map<string, AggregateBotStats>();
+
+    for (const bot of bots) {
+      if (!bot.ownerUserId) {
+        continue;
+      }
+
+      const current = totals.get(bot.ownerUserId) ?? createEmptyAggregateBotStats();
+      const stats = getBotAggregateStats(bot);
+      current.bots += 1;
+      current.matches += stats.matches;
+      current.wins += stats.wins;
+      current.losses += stats.losses;
+      current.draws += stats.draws;
+      current.shotsFired += stats.shotsFired;
+      current.shotsLanded += stats.shotsLanded;
+      current.directHits += stats.directHits;
+      current.scans += stats.scans;
+      current.kills += stats.kills;
+      current.deaths += stats.deaths;
+      current.damageGiven += stats.damageGiven;
+      current.damageTaken += stats.damageTaken;
+      current.collisions += stats.collisions;
+      totals.set(bot.ownerUserId, current);
+    }
+
+    return totals;
+  }, [bots]);
+  const currentUserBotStats = useMemo(() => {
+    if (!currentUser) {
+      return createEmptyAggregateBotStats();
+    }
+
+    return botStatsByOwner.get(currentUser.id) ?? createEmptyAggregateBotStats();
+  }, [botStatsByOwner, currentUser]);
+  const botPortfolioStats = useMemo(() => summarizeOwnedBotPortfolio(bots), [bots]);
 
   function resetBotEditor(): void {
     setEditingBotId(null);
@@ -585,6 +740,7 @@ export function App() {
     setBotForm({
       name: bot.name,
       description: bot.description,
+      statsMode: bot.statsMode,
       language: bot.latestRevision.language,
       source: bot.latestRevision.source,
       artifactBase64: "",
@@ -608,6 +764,7 @@ export function App() {
     setBotForm({
       name: `Copy of ${bot.name}`,
       description: bot.description,
+      statsMode: bot.statsMode,
       language: bot.latestRevision.language,
       source: bot.latestRevision.source,
       artifactBase64: "",
@@ -801,6 +958,7 @@ export function App() {
         ? {
             name: botForm.name,
             description: botForm.description,
+            statsMode: botForm.statsMode,
             language: botForm.language,
             artifactBase64: botForm.artifactBase64 || undefined,
             artifactFileName: botForm.artifactFileName || undefined
@@ -808,6 +966,7 @@ export function App() {
         : {
             name: botForm.name,
             description: botForm.description,
+            statsMode: botForm.statsMode,
             language: botForm.language,
             source: botForm.source
           };
@@ -1266,8 +1425,8 @@ export function App() {
                 </div>
                 <StatRow chips={[
                   { label: 'Bots', value: bots.length },
-                  { label: 'Arenas', value: arenas.length },
-                  { label: 'Matches', value: matches.length },
+                  { label: 'Tracked matches', value: botPortfolioStats.matches },
+                  { label: 'Portfolio hit rate', value: calculatePercent(botPortfolioStats.shotsLanded, botPortfolioStats.shotsFired) },
                 ]} />
                 <div className="two-col">
                   <div>
@@ -1294,7 +1453,7 @@ export function App() {
                           </button>
                         </div>
                       </div>
-                      <div className="form-grid two-up">
+                      <div className="form-grid three-up">
                         <label>
                           <span>Name</span>
                           <input value={botForm.name} onChange={(event) => setBotForm((current) => ({ ...current, name: event.target.value }))} />
@@ -1322,11 +1481,23 @@ export function App() {
                             <option value="linux-x64-binary">Linux x64 binary</option>
                           </select>
                         </label>
+                        <label>
+                          <span>Stats tracking</span>
+                          <select
+                            value={botForm.statsMode}
+                            onChange={(event) => setBotForm((current) => ({ ...current, statsMode: event.target.value as BotStatsMode }))}
+                          >
+                            <option value="per-bot">All variants together</option>
+                            <option value="per-variant">Each variant separately</option>
+                            <option value="reset-on-variant">Reset on new variant</option>
+                          </select>
+                        </label>
                       </div>
                       <label>
                         <span>Description</span>
                         <input value={botForm.description} onChange={(event) => setBotForm((current) => ({ ...current, description: event.target.value }))} />
                       </label>
+                      <p className="match-meta">Tracking mode: {getBotStatsModeLabel(botForm.statsMode)}</p>
                       {isBinaryLanguage(botForm.language) ? (
                         <div className="panel inset-panel">
                           <label>
@@ -1373,28 +1544,53 @@ export function App() {
                       <div className="scroll-list compact-list">
                         {filteredBots.length > 0 ? filteredBots.map((bot) => (
                           <article key={bot.id} className="list-card">
-                            <div className="card-toolbar">
-                              <div>
-                              <h3>{bot.name}</h3>
-                              <p>{bot.description || 'No description'}</p>
-                              <OwnerLabel ownerEmail={bot.ownerEmail} isAdmin={currentUser.role === "admin"} />
-                            </div>
-                              <div className="button-cluster">
-                                <button className="ghost-button small-button" type="button" onClick={() => duplicateBot(bot)} disabled={submitting}>
-                                  Duplicate
-                                </button>
-                                <button className="ghost-button small-button" type="button" onClick={() => startEditingBot(bot)} disabled={submitting}>
-                                  Edit
-                                </button>
-                                <button className="ghost-button small-button" type="button" onClick={() => void handleDeleteBot(bot)} disabled={submitting}>
-                                  Delete
-                                </button>
-                              </div>
-                            </div>
-                            <span>
-                              {bot.latestRevision.language} · v{bot.latestRevision.version}
-                              {bot.latestRevision.artifactFileName ? ` · ${bot.latestRevision.artifactFileName}` : ""}
-                            </span>
+                            {(() => {
+                              const stats = bot.activeStats;
+                              return (
+                                <>
+                                  <div className="card-toolbar">
+                                    <div>
+                                      <h3>{bot.name}</h3>
+                                      <p>{bot.description || 'No description'}</p>
+                                      <OwnerLabel ownerEmail={bot.ownerEmail} isAdmin={currentUser.role === "admin"} />
+                                    </div>
+                                    <div className="button-cluster">
+                                      <button className="ghost-button small-button" type="button" onClick={() => duplicateBot(bot)} disabled={submitting}>
+                                        Duplicate
+                                      </button>
+                                      <button className="ghost-button small-button" type="button" onClick={() => startEditingBot(bot)} disabled={submitting}>
+                                        Edit
+                                      </button>
+                                      <button className="ghost-button small-button" type="button" onClick={() => void handleDeleteBot(bot)} disabled={submitting}>
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <span>
+                                    {bot.latestRevision.language} · v{bot.latestRevision.version}
+                                    {bot.latestRevision.artifactFileName ? ` · ${bot.latestRevision.artifactFileName}` : ""}
+                                  </span>
+                                  <p className="match-meta">Stats mode: {getBotStatsModeLabel(bot.statsMode)}</p>
+                                  <div className="summary-grid bot-stats-grid">
+                                    <div className="summary-chip"><strong>{stats.matches}</strong><small>matches · {stats.wins}-{stats.losses}-{stats.draws}</small></div>
+                                    <div className="summary-chip"><strong>{stats.hitRatePct}%</strong><small>{stats.shotsLanded}/{stats.shotsFired} hit rate</small></div>
+                                    <div className="summary-chip"><strong>{stats.damageGiven}</strong><small>damage given · {stats.damageTaken} taken</small></div>
+                                    <div className="summary-chip"><strong>{stats.kills}</strong><small>kills · {stats.deaths} deaths · {stats.collisions} collisions</small></div>
+                                  </div>
+                                  {bot.statsMode !== "per-bot" && bot.statsBuckets.length > 1 ? (
+                                    <div className="variant-stats-list">
+                                      {bot.statsBuckets.map((bucket) => (
+                                        <div key={bucket.id} className="variant-stats-item">
+                                          <strong>{bucket.label}</strong>
+                                          <span>{bucket.wins}-{bucket.losses}-{bucket.draws} · {bucket.matches} matches</span>
+                                          <span>{bucket.hitRatePct}% hit · {bucket.damageGiven}/{bucket.damageTaken} dmg</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </>
+                              );
+                            })()}
                           </article>
                         )) : <p className="muted">{bots.length > 0 ? "No bots match the current filter." : "No bots stored yet."}</p>}
                       </div>
@@ -1777,8 +1973,33 @@ export function App() {
                 <StatRow chips={[
                   { label: 'Signed in as', value: currentUser.email },
                   { label: 'Role', value: currentUser.role },
-                  { label: 'Managed users', value: currentUser.role === 'admin' ? users.length : 1 },
+                  { label: 'Your bots', value: currentUserBotStats.bots },
+                  { label: 'Your win rate', value: calculatePercent(currentUserBotStats.wins, currentUserBotStats.matches) },
+                  { label: 'Your hit rate', value: calculatePercent(currentUserBotStats.shotsLanded, currentUserBotStats.shotsFired) },
+                  ...(currentUser.role === 'admin' ? [{ label: 'Managed users', value: users.length }] : []),
                 ]} />
+                <section className="panel">
+                  <div className="panel-header">
+                    <div>
+                      <p className="eyebrow">Performance</p>
+                      <h2>Your Bot Statistics</h2>
+                    </div>
+                  </div>
+                  <div className="summary-grid account-stats-grid">
+                    <div className="summary-chip"><strong>{currentUserBotStats.matches}</strong><small>matches tracked</small></div>
+                    <div className="summary-chip"><strong>{currentUserBotStats.wins}-{currentUserBotStats.losses}-{currentUserBotStats.draws}</strong><small>win-loss-draw</small></div>
+                    <div className="summary-chip"><strong>{calculatePercent(currentUserBotStats.wins, currentUserBotStats.matches)}</strong><small>win rate</small></div>
+                    <div className="summary-chip"><strong>{calculatePercent(currentUserBotStats.shotsLanded, currentUserBotStats.shotsFired)}</strong><small>{currentUserBotStats.shotsLanded}/{currentUserBotStats.shotsFired} hits</small></div>
+                    <div className="summary-chip"><strong>{currentUserBotStats.damageGiven}</strong><small>damage given</small></div>
+                    <div className="summary-chip"><strong>{currentUserBotStats.damageTaken}</strong><small>damage taken</small></div>
+                    <div className="summary-chip"><strong>{currentUserBotStats.kills}</strong><small>kills</small></div>
+                    <div className="summary-chip"><strong>{currentUserBotStats.deaths}</strong><small>deaths</small></div>
+                    <div className="summary-chip"><strong>{currentUserBotStats.directHits}</strong><small>direct hits</small></div>
+                    <div className="summary-chip"><strong>{currentUserBotStats.scans}</strong><small>scans</small></div>
+                    <div className="summary-chip"><strong>{currentUserBotStats.collisions}</strong><small>collisions</small></div>
+                    <div className="summary-chip"><strong>{calculatePercent(currentUserBotStats.matches - currentUserBotStats.deaths, currentUserBotStats.matches)}</strong><small>survival rate</small></div>
+                  </div>
+                </section>
                 <section className="panel">
                   <div className="panel-header">
                     <div>
@@ -1883,10 +2104,19 @@ export function App() {
                               <p>{user.role} · {user.isActive ? 'active' : 'inactive'}</p>
                               {(() => {
                                 const counts = ownershipCounts.get(user.id) ?? { bots: 0, arenas: 0, ladders: 0, tournaments: 0, matches: 0 };
+                                const stats = botStatsByOwner.get(user.id) ?? createEmptyAggregateBotStats();
                                 return (
-                                  <p className="match-meta">
-                                    {counts.bots} bots · {counts.arenas} arenas · {counts.ladders} ladders · {counts.tournaments} tournaments · {counts.matches} matches
-                                  </p>
+                                  <>
+                                    <p className="match-meta">
+                                      {counts.bots} bots · {counts.arenas} arenas · {counts.ladders} ladders · {counts.tournaments} tournaments · {counts.matches} matches
+                                    </p>
+                                    <div className="mini-stat-line">
+                                      <span>{stats.wins}-{stats.losses}-{stats.draws}</span>
+                                      <span>{calculatePercent(stats.wins, stats.matches)} win</span>
+                                      <span>{calculatePercent(stats.shotsLanded, stats.shotsFired)} hit</span>
+                                      <span>{stats.damageGiven}/{stats.damageTaken} dmg</span>
+                                    </div>
+                                  </>
                                 );
                               })()}
                             </div>

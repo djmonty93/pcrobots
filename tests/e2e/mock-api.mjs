@@ -160,12 +160,41 @@ function createFakeEvents(teamABotId, teamBBotId) {
 function createBotRecord(body, ownerUserId) {
   const now = nowIso();
   const id = randomUUID();
+  const statsMode = body.statsMode ?? "per-bot";
+  const activeStats = {
+    id: `pending:${id}:${statsMode === "per-bot" ? "bot" : "revision"}`,
+    botId: id,
+    botRevisionId: statsMode === "per-bot" ? null : `${id}-revision`,
+    scope: statsMode === "per-bot" ? "bot" : "revision",
+    revisionVersion: statsMode === "per-bot" ? null : 1,
+    label: statsMode === "per-bot" ? "All variants" : "v1",
+    matches: 0,
+    wins: 0,
+    losses: 0,
+    draws: 0,
+    shotsFired: 0,
+    shotsLanded: 0,
+    directHits: 0,
+    scans: 0,
+    kills: 0,
+    deaths: 0,
+    damageGiven: 0,
+    damageTaken: 0,
+    collisions: 0,
+    winRatePct: 0,
+    hitRatePct: 0,
+    survivalRatePct: 0,
+    lastMatchAt: null,
+    createdAt: now,
+    updatedAt: now
+  };
   return {
     id,
     ownerUserId,
     ownerEmail: getOwnerEmail(ownerUserId),
     name: body.name,
     description: body.description ?? "",
+    statsMode,
     createdAt: now,
     updatedAt: now,
     latestRevision: {
@@ -178,7 +207,9 @@ function createBotRecord(body, ownerUserId) {
       artifactSizeBytes: null,
       version: 1,
       createdAt: now
-    }
+    },
+    statsBuckets: [activeStats],
+    activeStats
   };
 }
 

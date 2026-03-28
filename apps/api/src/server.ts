@@ -29,6 +29,7 @@ import {
   type CreateMatchInput,
   type CreateLadderInput,
   type CreateTournamentInput,
+  type BotStatsMode,
   type LadderRecord,
   type MatchRecord,
   type SupportedLanguage,
@@ -53,6 +54,7 @@ await retry(async () => {
 }, { label: "api bootstrap" });
 
 const supportedLanguages = ["javascript", "typescript", "python", "lua", "linux-x64-binary"] as const;
+const supportedBotStatsModes = ["per-bot", "per-variant", "reset-on-variant"] as const;
 const supportedModes = ["live", "queued", "ladder", "round-robin", "single-elimination", "double-elimination"] as const;
 const supportedTournamentFormats = ["round-robin", "single-elimination", "double-elimination"] as const;
 const supportedTeams = ["A", "B", "C"] as const;
@@ -333,6 +335,15 @@ function expectLanguage(value: unknown): SupportedLanguage {
   return value as SupportedLanguage;
 }
 
+function expectBotStatsMode(value: unknown, fallback: BotStatsMode = "per-bot"): BotStatsMode {
+  const candidate = value ?? fallback;
+  if (typeof candidate !== "string" || !supportedBotStatsModes.includes(candidate as BotStatsMode)) {
+    badRequest(`statsMode must be one of: ${supportedBotStatsModes.join(", ")}`);
+  }
+
+  return candidate as BotStatsMode;
+}
+
 function expectMode(value: unknown, fallback: SupportedMode = "live"): SupportedMode {
   const candidate = (value ?? fallback) as string;
   if (!supportedModes.includes(candidate as SupportedMode)) {
@@ -450,6 +461,7 @@ function parseCreateBotInput(body: unknown): CreateBotInput {
   if (name.length > 200) badRequest("name must not exceed 200 characters");
   const description = typeof body.description === "string" ? body.description.trim() : "";
   if (description.length > 2000) badRequest("description must not exceed 2000 characters");
+  const statsMode = expectBotStatsMode(body.statsMode);
   const language = expectLanguage(body.language);
 
   if (language === "linux-x64-binary") {
@@ -461,6 +473,7 @@ function parseCreateBotInput(body: unknown): CreateBotInput {
     return {
       name,
       description,
+      statsMode,
       language,
       artifactBase64: artifact.artifactBase64,
       artifactFileName: artifact.artifactFileName,
@@ -474,7 +487,7 @@ function parseCreateBotInput(body: unknown): CreateBotInput {
     badRequest("source must not exceed 100,000 characters");
   }
 
-  return { name, description, language, source };
+  return { name, description, statsMode, language, source };
 }
 
 function parseUpdateBotInput(body: unknown): UpdateBotInput {
@@ -486,6 +499,7 @@ function parseUpdateBotInput(body: unknown): UpdateBotInput {
   if (name.length > 200) badRequest("name must not exceed 200 characters");
   const description = typeof body.description === "string" ? body.description.trim() : "";
   if (description.length > 2000) badRequest("description must not exceed 2000 characters");
+  const statsMode = body.statsMode !== undefined ? expectBotStatsMode(body.statsMode) : undefined;
   const language = expectLanguage(body.language);
 
   if (language === "linux-x64-binary") {
@@ -493,6 +507,7 @@ function parseUpdateBotInput(body: unknown): UpdateBotInput {
     return {
       name,
       description,
+      statsMode,
       language,
       artifactBase64: artifact?.artifactBase64,
       artifactFileName: artifact?.artifactFileName,
@@ -506,7 +521,7 @@ function parseUpdateBotInput(body: unknown): UpdateBotInput {
     badRequest("source must not exceed 100,000 characters");
   }
 
-  return { name, description, language, source };
+  return { name, description, statsMode, language, source };
 }
 
 function parseCreateArenaInput(body: unknown): CreateArenaInput {

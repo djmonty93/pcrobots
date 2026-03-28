@@ -1,7 +1,17 @@
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
+import { type MatchEvent, type MatchResult } from "@pcrobots/engine";
 
 import { bootstrapSql } from "./schema.js";
+import {
+  calculateRate,
+  createBotStatsWritePlans,
+  createEmptyBotStatsCounters,
+  shouldResetBotStatsOnUpdate,
+  summarizeCompletedMatchStats,
+  type BotStatsMode,
+  type BotStatsScope
+} from "./bot-stats.js";
 
 export type SupportedLanguage = "javascript" | "typescript" | "python" | "lua" | "linux-x64-binary";
 export type TeamId = "A" | "B" | "C";
@@ -62,15 +72,46 @@ export interface BotRevisionRecord {
   createdAt: string;
 }
 
+export interface BotStatsBucketRecord {
+  id: string;
+  botId: string;
+  botRevisionId: string | null;
+  scope: BotStatsScope;
+  revisionVersion: number | null;
+  label: string;
+  matches: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  shotsFired: number;
+  shotsLanded: number;
+  directHits: number;
+  scans: number;
+  kills: number;
+  deaths: number;
+  damageGiven: number;
+  damageTaken: number;
+  collisions: number;
+  winRatePct: number;
+  hitRatePct: number;
+  survivalRatePct: number;
+  lastMatchAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BotRecord {
   id: string;
   ownerUserId: string | null;
   ownerEmail: string | null;
   name: string;
   description: string;
+  statsMode: BotStatsMode;
   createdAt: string;
   updatedAt: string;
   latestRevision: BotRevisionRecord;
+  statsBuckets: BotStatsBucketRecord[];
+  activeStats: BotStatsBucketRecord;
 }
 
 export interface ArenaRevisionRecord {
@@ -147,6 +188,7 @@ export interface ArenaRevisionLookupRecord extends ArenaRevisionRecord {
 interface BaseBotInput {
   name: string;
   description?: string;
+  statsMode?: BotStatsMode;
 }
 
 export interface SourceBotInput extends BaseBotInput {
@@ -250,6 +292,7 @@ type BotRow = {
   owner_email: string | null;
   name: string;
   description: string;
+  stats_mode: BotStatsMode;
   created_at: TimestampValue;
   updated_at: TimestampValue;
   revision_id: string;
@@ -260,6 +303,30 @@ type BotRow = {
   revision_artifact_size_bytes: number | null;
   revision_version: number;
   revision_created_at: TimestampValue;
+};
+
+type BotStatsRow = {
+  id: string;
+  bot_id: string;
+  bot_revision_id: string | null;
+  scope: BotStatsScope;
+  revision_version: number | null;
+  matches: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  shots_fired: number;
+  shots_landed: number;
+  direct_hits: number;
+  scans: number;
+  kills: number;
+  deaths: number;
+  damage_given: number;
+  damage_taken: number;
+  collisions: number;
+  last_match_at: TimestampValue | null;
+  created_at: TimestampValue;
+  updated_at: TimestampValue;
 };
 
 type ArenaRow = {
@@ -380,6 +447,10 @@ function hasBinaryArtifact(input: CreateBotInput | UpdateBotInput): input is Lin
   return isBinaryLanguage(input.language);
 }
 
+function normalizeBotStatsMode(mode?: BotStatsMode): BotStatsMode {
+  return mode ?? "per-bot";
+}
+
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -438,26 +509,110 @@ function mapUserRow(row: Pick<UserRow, "id" | "email" | "role" | "is_active" | "
   };
 }
 
-function mapBotRow(row: BotRow): BotRecord {
+function mapBotStatsRow(row: BotStatsRow): BotStatsBucketRecord {
   return {
+    id: row.id,
+    botId: row.bot_id,
+    botRevisionId: row.bot_revision_id,
+    scope: row.scope,
+    revisionVersion: row.revision_version,
+    label: row.scope === "bot" ? "All variants" : `v${row.revision_version ?? "?"}`,
+    matches: row.matches,
+    wins: row.wins,
+    losses: row.losses,
+    draws: row.draws,
+    shotsFired: row.shots_fired,
+    shotsLanded: row.shots_landed,
+    directHits: row.direct_hits,
+    scans: row.scans,
+    kills: row.kills,
+    deaths: row.deaths,
+    damageGiven: row.damage_given,
+    damageTaken: row.damage_taken,
+    collisions: row.collisions,
+    winRatePct: calculateRate(row.wins, row.matches),
+    hitRatePct: calculateRate(row.shots_landed, row.shots_fired),
+    survivalRatePct: calculateRate(row.matches - row.deaths, row.matches),
+    lastMatchAt: row.last_match_at ? toIso(row.last_match_at) : null,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at)
+  };
+}
+
+function createZeroBotStatsBucket(bot: {
+  id: string;
+  latestRevision: BotRevisionRecord;
+  statsMode: BotStatsMode;
+  updatedAt: string;
+}): BotStatsBucketRecord {
+  const scope: BotStatsScope = bot.statsMode === "per-bot" ? "bot" : "revision";
+  return {
+    id: `pending:${bot.id}:${scope === "bot" ? "bot" : bot.latestRevision.id}`,
+    botId: bot.id,
+    botRevisionId: scope === "bot" ? null : bot.latestRevision.id,
+    scope,
+    revisionVersion: scope === "bot" ? null : bot.latestRevision.version,
+    label: scope === "bot" ? "All variants" : `v${bot.latestRevision.version}`,
+    ...createEmptyBotStatsCounters(),
+    winRatePct: 0,
+    hitRatePct: 0,
+    survivalRatePct: 0,
+    lastMatchAt: null,
+    createdAt: bot.latestRevision.createdAt,
+    updatedAt: bot.updatedAt
+  };
+}
+
+function mapBotRow(row: BotRow, statsRows: BotStatsRow[]): BotRecord {
+  const latestRevision: BotRevisionRecord = {
+    id: row.revision_id,
+    botId: row.id,
+    language: row.revision_language,
+    source: row.revision_source,
+    artifactFileName: row.revision_artifact_filename,
+    artifactSha256: row.revision_artifact_sha256,
+    artifactSizeBytes: row.revision_artifact_size_bytes,
+    version: row.revision_version,
+    createdAt: toIso(row.revision_created_at)
+  };
+  const mappedStats = statsRows
+    .map(mapBotStatsRow)
+    .sort((left, right) => {
+      if (left.scope !== right.scope) {
+        return left.scope === "bot" ? -1 : 1;
+      }
+
+      return (right.revisionVersion ?? 0) - (left.revisionVersion ?? 0);
+    });
+
+  const baseBot = {
     id: row.id,
     ownerUserId: row.owner_user_id,
     ownerEmail: row.owner_email,
     name: row.name,
     description: row.description,
+    statsMode: row.stats_mode,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
-    latestRevision: {
-      id: row.revision_id,
-      botId: row.id,
-      language: row.revision_language,
-      source: row.revision_source,
-      artifactFileName: row.revision_artifact_filename,
-      artifactSha256: row.revision_artifact_sha256,
-      artifactSizeBytes: row.revision_artifact_size_bytes,
-      version: row.revision_version,
-      createdAt: toIso(row.revision_created_at)
-    }
+    latestRevision
+  };
+  const activeStats =
+    (row.stats_mode === "per-bot"
+      ? mappedStats.find((entry) => entry.scope === "bot")
+      : mappedStats.find((entry) => entry.botRevisionId === latestRevision.id)) ?? createZeroBotStatsBucket(baseBot);
+
+  const statsBuckets =
+    row.stats_mode === "per-bot"
+      ? [activeStats]
+      : mappedStats.length > 0 && mappedStats.some((entry) => entry.botRevisionId === latestRevision.id)
+        ? mappedStats
+        : [activeStats, ...mappedStats];
+
+  return {
+    ...baseBot,
+    latestRevision,
+    statsBuckets,
+    activeStats
   };
 }
 
@@ -556,6 +711,224 @@ function mapArenaRevisionLookupRow(row: ArenaRevisionLookupRow): ArenaRevisionLo
 
 function isAdmin(scope?: AccessScope): boolean {
   return scope?.role === "admin";
+}
+
+type Queryable = Pick<Pool, "query"> | Pick<PoolClient, "query">;
+
+async function loadBotStatsRows(queryable: Queryable, botIds: string[]): Promise<BotStatsRow[]> {
+  if (botIds.length === 0) {
+    return [];
+  }
+
+  const result = await queryable.query<BotStatsRow>(
+    `
+      SELECT
+        bs.id,
+        bs.bot_id,
+        bs.bot_revision_id,
+        bs.scope,
+        br.version AS revision_version,
+        bs.matches,
+        bs.wins,
+        bs.losses,
+        bs.draws,
+        bs.shots_fired,
+        bs.shots_landed,
+        bs.direct_hits,
+        bs.scans,
+        bs.kills,
+        bs.deaths,
+        bs.damage_given,
+        bs.damage_taken,
+        bs.collisions,
+        bs.last_match_at,
+        bs.created_at,
+        bs.updated_at
+      FROM bot_stats AS bs
+      LEFT JOIN bot_revisions AS br ON br.id = bs.bot_revision_id
+      WHERE bs.bot_id = ANY($1::text[])
+      ORDER BY bs.updated_at DESC
+    `,
+    [botIds]
+  );
+
+  return result.rows;
+}
+
+async function upsertBotStatsBucket(
+  client: PoolClient,
+  input: {
+    botId: string;
+    botRevisionId: string | null;
+    scope: BotStatsScope;
+    scopeKey: string;
+    matches: number;
+    wins: number;
+    losses: number;
+    draws: number;
+    shotsFired: number;
+    shotsLanded: number;
+    directHits: number;
+    scans: number;
+    kills: number;
+    deaths: number;
+    damageGiven: number;
+    damageTaken: number;
+    collisions: number;
+    absolute?: boolean;
+  }
+): Promise<void> {
+  await client.query(
+    `
+      INSERT INTO bot_stats (
+        id,
+        bot_id,
+        bot_revision_id,
+        scope,
+        scope_key,
+        matches,
+        wins,
+        losses,
+        draws,
+        shots_fired,
+        shots_landed,
+        direct_hits,
+        scans,
+        kills,
+        deaths,
+        damage_given,
+        damage_taken,
+        collisions,
+        last_match_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8, $9,
+        $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW()
+      )
+      ON CONFLICT (bot_id, scope_key)
+      DO UPDATE SET
+        bot_revision_id = EXCLUDED.bot_revision_id,
+        scope = EXCLUDED.scope,
+        matches = CASE WHEN $19 THEN EXCLUDED.matches ELSE bot_stats.matches + EXCLUDED.matches END,
+        wins = CASE WHEN $19 THEN EXCLUDED.wins ELSE bot_stats.wins + EXCLUDED.wins END,
+        losses = CASE WHEN $19 THEN EXCLUDED.losses ELSE bot_stats.losses + EXCLUDED.losses END,
+        draws = CASE WHEN $19 THEN EXCLUDED.draws ELSE bot_stats.draws + EXCLUDED.draws END,
+        shots_fired = CASE WHEN $19 THEN EXCLUDED.shots_fired ELSE bot_stats.shots_fired + EXCLUDED.shots_fired END,
+        shots_landed = CASE WHEN $19 THEN EXCLUDED.shots_landed ELSE bot_stats.shots_landed + EXCLUDED.shots_landed END,
+        direct_hits = CASE WHEN $19 THEN EXCLUDED.direct_hits ELSE bot_stats.direct_hits + EXCLUDED.direct_hits END,
+        scans = CASE WHEN $19 THEN EXCLUDED.scans ELSE bot_stats.scans + EXCLUDED.scans END,
+        kills = CASE WHEN $19 THEN EXCLUDED.kills ELSE bot_stats.kills + EXCLUDED.kills END,
+        deaths = CASE WHEN $19 THEN EXCLUDED.deaths ELSE bot_stats.deaths + EXCLUDED.deaths END,
+        damage_given = CASE WHEN $19 THEN EXCLUDED.damage_given ELSE bot_stats.damage_given + EXCLUDED.damage_given END,
+        damage_taken = CASE WHEN $19 THEN EXCLUDED.damage_taken ELSE bot_stats.damage_taken + EXCLUDED.damage_taken END,
+        collisions = CASE WHEN $19 THEN EXCLUDED.collisions ELSE bot_stats.collisions + EXCLUDED.collisions END,
+        last_match_at = NOW(),
+        updated_at = NOW()
+    `,
+    [
+      randomUUID(),
+      input.botId,
+      input.botRevisionId,
+      input.scope,
+      input.scopeKey,
+      input.matches,
+      input.wins,
+      input.losses,
+      input.draws,
+      input.shotsFired,
+      input.shotsLanded,
+      input.directHits,
+      input.scans,
+      input.kills,
+      input.deaths,
+      input.damageGiven,
+      input.damageTaken,
+      input.collisions,
+      input.absolute ?? false
+    ]
+  );
+}
+
+async function ensurePerBotAggregateStatsBucket(client: PoolClient, botId: string): Promise<void> {
+  const existingAggregate = await client.query<{ id: string }>(
+    `
+      SELECT id
+      FROM bot_stats
+      WHERE bot_id = $1
+        AND scope_key = 'bot'
+      LIMIT 1
+    `,
+    [botId]
+  );
+
+  if ((existingAggregate.rowCount ?? 0) > 0) {
+    return;
+  }
+
+  const totals = await client.query<{
+    bot_revision_id: string | null;
+    matches: number;
+    wins: number;
+    losses: number;
+    draws: number;
+    shots_fired: number;
+    shots_landed: number;
+    direct_hits: number;
+    scans: number;
+    kills: number;
+    deaths: number;
+    damage_given: number;
+    damage_taken: number;
+    collisions: number;
+  }>(
+    `
+      SELECT
+        MAX(bot_revision_id) AS bot_revision_id,
+        COALESCE(SUM(matches), 0)::integer AS matches,
+        COALESCE(SUM(wins), 0)::integer AS wins,
+        COALESCE(SUM(losses), 0)::integer AS losses,
+        COALESCE(SUM(draws), 0)::integer AS draws,
+        COALESCE(SUM(shots_fired), 0)::integer AS shots_fired,
+        COALESCE(SUM(shots_landed), 0)::integer AS shots_landed,
+        COALESCE(SUM(direct_hits), 0)::integer AS direct_hits,
+        COALESCE(SUM(scans), 0)::integer AS scans,
+        COALESCE(SUM(kills), 0)::integer AS kills,
+        COALESCE(SUM(deaths), 0)::integer AS deaths,
+        COALESCE(SUM(damage_given), 0)::integer AS damage_given,
+        COALESCE(SUM(damage_taken), 0)::integer AS damage_taken,
+        COALESCE(SUM(collisions), 0)::integer AS collisions
+      FROM bot_stats
+      WHERE bot_id = $1
+    `,
+    [botId]
+  );
+
+  const row = totals.rows[0];
+  if (!row || row.matches <= 0) {
+    return;
+  }
+
+  await upsertBotStatsBucket(client, {
+    botId,
+    botRevisionId: null,
+    scope: "bot",
+    scopeKey: "bot",
+    matches: row.matches,
+    wins: row.wins,
+    losses: row.losses,
+    draws: row.draws,
+    shotsFired: row.shots_fired,
+    shotsLanded: row.shots_landed,
+    directHits: row.direct_hits,
+    scans: row.scans,
+    kills: row.kills,
+    deaths: row.deaths,
+    damageGiven: row.damage_given,
+    damageTaken: row.damage_taken,
+    collisions: row.collisions,
+    absolute: true
+  });
 }
 
 async function withTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -958,85 +1331,104 @@ export class Database {
   }
 
   async listBots(scope?: AccessScope): Promise<BotRecord[]> {
-    const params: unknown[] = [];
-    const whereClause = isAdmin(scope) || !scope ? "" : "WHERE b.owner_user_id = $1";
-    if (scope && !isAdmin(scope)) {
-      params.push(scope.userId);
-    }
+    return withTransaction(this.pool, async (client) => {
+      const params: unknown[] = [];
+      const whereClause = isAdmin(scope) || !scope ? "" : "WHERE b.owner_user_id = $1";
+      if (scope && !isAdmin(scope)) {
+        params.push(scope.userId);
+      }
 
-    const result = await this.pool.query<BotRow>(`
-      SELECT
-        b.id,
-        b.owner_user_id,
-        u.email AS owner_email,
-        b.name,
-        b.description,
-        b.created_at,
-        b.updated_at,
-        br.id AS revision_id,
-        br.language AS revision_language,
-        br.source AS revision_source,
-        br.artifact_filename AS revision_artifact_filename,
-        br.artifact_sha256 AS revision_artifact_sha256,
-        br.artifact_size_bytes AS revision_artifact_size_bytes,
-        br.version AS revision_version,
-        br.created_at AS revision_created_at
-      FROM bots AS b
-      LEFT JOIN users AS u ON u.id = b.owner_user_id
-      JOIN LATERAL (
-        SELECT id, language, source, artifact_filename, artifact_sha256, artifact_size_bytes, version, created_at
-        FROM bot_revisions
-        WHERE bot_id = b.id
-        ORDER BY version DESC
-        LIMIT 1
-      ) AS br ON TRUE
-      ${whereClause}
-      ORDER BY b.created_at DESC
-    `, params);
+      const result = await client.query<BotRow>(`
+        SELECT
+          b.id,
+          b.owner_user_id,
+          u.email AS owner_email,
+          b.name,
+          b.description,
+          b.stats_mode,
+          b.created_at,
+          b.updated_at,
+          br.id AS revision_id,
+          br.language AS revision_language,
+          br.source AS revision_source,
+          br.artifact_filename AS revision_artifact_filename,
+          br.artifact_sha256 AS revision_artifact_sha256,
+          br.artifact_size_bytes AS revision_artifact_size_bytes,
+          br.version AS revision_version,
+          br.created_at AS revision_created_at
+        FROM bots AS b
+        LEFT JOIN users AS u ON u.id = b.owner_user_id
+        JOIN LATERAL (
+          SELECT id, language, source, artifact_filename, artifact_sha256, artifact_size_bytes, version, created_at
+          FROM bot_revisions
+          WHERE bot_id = b.id
+          ORDER BY version DESC
+          LIMIT 1
+        ) AS br ON TRUE
+        ${whereClause}
+        ORDER BY b.created_at DESC
+      `, params);
 
-    return result.rows.map(mapBotRow);
+      const statsRows = await loadBotStatsRows(client, result.rows.map((row) => row.id));
+      const statsByBotId = new Map<string, BotStatsRow[]>();
+      for (const row of statsRows) {
+        const list = statsByBotId.get(row.bot_id) ?? [];
+        list.push(row);
+        statsByBotId.set(row.bot_id, list);
+      }
+
+      return result.rows.map((row) => mapBotRow(row, statsByBotId.get(row.id) ?? []));
+    });
   }
 
   async getBot(botId: string, scope?: AccessScope): Promise<BotRecord | null> {
-    const params: unknown[] = [botId];
-    let scopeClause = "";
-    if (scope && !isAdmin(scope)) {
-      params.push(scope.userId);
-      scopeClause = "AND b.owner_user_id = $2";
-    }
+    return withTransaction(this.pool, async (client) => {
+      const params: unknown[] = [botId];
+      let scopeClause = "";
+      if (scope && !isAdmin(scope)) {
+        params.push(scope.userId);
+        scopeClause = "AND b.owner_user_id = $2";
+      }
 
-    const result = await this.pool.query<BotRow>(`
-      SELECT
-        b.id,
-        b.owner_user_id,
-        u.email AS owner_email,
-        b.name,
-        b.description,
-        b.created_at,
-        b.updated_at,
-        br.id AS revision_id,
-        br.language AS revision_language,
-        br.source AS revision_source,
-        br.artifact_filename AS revision_artifact_filename,
-        br.artifact_sha256 AS revision_artifact_sha256,
-        br.artifact_size_bytes AS revision_artifact_size_bytes,
-        br.version AS revision_version,
-        br.created_at AS revision_created_at
-      FROM bots AS b
-      LEFT JOIN users AS u ON u.id = b.owner_user_id
-      JOIN LATERAL (
-        SELECT id, language, source, artifact_filename, artifact_sha256, artifact_size_bytes, version, created_at
-        FROM bot_revisions
-        WHERE bot_id = b.id
-        ORDER BY version DESC
-        LIMIT 1
-      ) AS br ON TRUE
-      WHERE b.id = $1
-      ${scopeClause}
-    `, params);
+      const result = await client.query<BotRow>(`
+        SELECT
+          b.id,
+          b.owner_user_id,
+          u.email AS owner_email,
+          b.name,
+          b.description,
+          b.stats_mode,
+          b.created_at,
+          b.updated_at,
+          br.id AS revision_id,
+          br.language AS revision_language,
+          br.source AS revision_source,
+          br.artifact_filename AS revision_artifact_filename,
+          br.artifact_sha256 AS revision_artifact_sha256,
+          br.artifact_size_bytes AS revision_artifact_size_bytes,
+          br.version AS revision_version,
+          br.created_at AS revision_created_at
+        FROM bots AS b
+        LEFT JOIN users AS u ON u.id = b.owner_user_id
+        JOIN LATERAL (
+          SELECT id, language, source, artifact_filename, artifact_sha256, artifact_size_bytes, version, created_at
+          FROM bot_revisions
+          WHERE bot_id = b.id
+          ORDER BY version DESC
+          LIMIT 1
+        ) AS br ON TRUE
+        WHERE b.id = $1
+        ${scopeClause}
+      `, params);
 
-    const row = result.rows[0];
-    return row ? mapBotRow(row) : null;
+      const row = result.rows[0];
+      if (!row) {
+        return null;
+      }
+
+      const statsRows = await loadBotStatsRows(client, [row.id]);
+      return mapBotRow(row, statsRows);
+    });
   }
 
   async getBotRevision(revisionId: string, scope?: AccessScope): Promise<BotRevisionLookupRecord | null> {
@@ -1077,10 +1469,10 @@ export class Database {
 
       await client.query(
         `
-          INSERT INTO bots (id, owner_user_id, name, description)
-          VALUES ($1, $2, $3, $4)
+          INSERT INTO bots (id, owner_user_id, name, description, stats_mode)
+          VALUES ($1, $2, $3, $4, $5)
         `,
-        [createdBotId, ownerUserId, input.name, input.description ?? ""]
+        [createdBotId, ownerUserId, input.name, input.description ?? "", normalizeBotStatsMode(input.statsMode)]
       );
 
       await insertBotRevision(client, createdBotId, 1, input);
@@ -1098,17 +1490,32 @@ export class Database {
 
   async updateBot(botId: string, input: UpdateBotInput): Promise<BotRecord> {
     await withTransaction(this.pool, async (client) => {
+      const currentBotResult = await client.query<{ id: string; stats_mode: BotStatsMode }>(
+        `
+          SELECT id, stats_mode
+          FROM bots
+          WHERE id = $1
+        `,
+        [botId]
+      );
+      const currentBot = currentBotResult.rows[0];
+      if (!currentBot) {
+        throw new Error(`Bot ${botId} was not found`);
+      }
+
+      const nextStatsMode = normalizeBotStatsMode(input.statsMode ?? currentBot.stats_mode);
       const updateResult = await client.query<{ id: string }>(
         `
           UPDATE bots
           SET
             name = $2,
             description = $3,
+            stats_mode = $4,
             updated_at = NOW()
           WHERE id = $1
           RETURNING id
         `,
-        [botId, input.name, input.description ?? ""]
+        [botId, input.name, input.description ?? "", nextStatsMode]
       );
 
       if ((updateResult.rowCount ?? 0) === 0) {
@@ -1130,6 +1537,13 @@ export class Database {
         );
 
         await insertBotRevision(client, botId, versionResult.rows[0].next_version, input);
+      }
+
+      const shouldResetForNewVariant = shouldResetBotStatsOnUpdate(nextStatsMode, !isMetadataOnlyBinaryUpdate);
+      if (shouldResetForNewVariant) {
+        await client.query(`DELETE FROM bot_stats WHERE bot_id = $1`, [botId]);
+      } else if (nextStatsMode === "per-bot") {
+        await ensurePerBotAggregateStatsBucket(client, botId);
       }
     });
 
@@ -1525,13 +1939,20 @@ export class Database {
         const participantId = randomUUID();
         const botRevisionId = participant.botRevisionId ?? (await this.resolveLatestBotRevisionId(client, participant.botId));
 
-        await client.query(
+        const insertParticipantResult = await client.query(
           `
-            INSERT INTO match_participants (id, match_id, bot_revision_id, team_id, slot)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO match_participants (id, match_id, bot_revision_id, stats_mode, team_id, slot)
+            SELECT $1, $2, $3, b.stats_mode, $4, $5
+            FROM bot_revisions AS br
+            JOIN bots AS b ON b.id = br.bot_id
+            WHERE br.id = $3
           `,
           [participantId, createdMatchId, botRevisionId, participant.teamId, index]
         );
+
+        if ((insertParticipantResult.rowCount ?? 0) === 0) {
+          throw new Error(`Bot revision ${botRevisionId} was not found while creating match ${createdMatchId}`);
+        }
       }
 
       return createdMatchId;
@@ -1643,12 +2064,80 @@ export class Database {
         return false;
       }
 
+      await this.updateBotStatsForCompletedMatch(client, matchId, payload.result, payload.events);
+
       if (afterComplete) {
         await afterComplete(client);
       }
 
       return true;
     });
+  }
+
+  private async updateBotStatsForCompletedMatch(
+    client: PoolClient,
+    matchId: string,
+    result: unknown,
+    events: unknown
+  ): Promise<void> {
+    const participantResult = await client.query<{
+      participant_id: string;
+      bot_id: string;
+      bot_revision_id: string;
+      revision_version: number;
+      team_id: TeamId;
+      stats_mode: BotStatsMode;
+    }>(
+      `
+        SELECT
+          mp.id AS participant_id,
+          br.bot_id,
+          mp.bot_revision_id,
+          br.version AS revision_version,
+          mp.team_id,
+          COALESCE(mp.stats_mode, b.stats_mode) AS stats_mode
+        FROM match_participants AS mp
+        JOIN bot_revisions AS br ON br.id = mp.bot_revision_id
+        JOIN bots AS b ON b.id = br.bot_id
+        WHERE mp.match_id = $1
+        ORDER BY mp.slot ASC
+      `,
+      [matchId]
+    );
+
+    if (participantResult.rows.length === 0) {
+      return;
+    }
+
+    if (!Array.isArray(events)) {
+      console.warn(`[bot-stats] updateBotStatsForCompletedMatch: expected events array for match ${matchId}, got ${typeof events}`);
+    }
+    const safeEvents = Array.isArray(events) ? (events as MatchEvent[]) : [];
+
+    if (result !== null && typeof result !== "object") {
+      console.warn(`[bot-stats] updateBotStatsForCompletedMatch: unexpected result type for match ${matchId}: ${typeof result}`);
+    }
+
+    const deltas = summarizeCompletedMatchStats({
+      participants: participantResult.rows.map((row) => ({
+        id: row.participant_id,
+        botId: row.bot_id,
+        botRevisionId: row.bot_revision_id,
+        revisionVersion: row.revision_version,
+        teamId: row.team_id
+      })),
+      result: (result as MatchResult | null) ?? null,
+      events: safeEvents
+    });
+
+    const statsModeByBotId = new Map(participantResult.rows.map((row) => [row.bot_id, row.stats_mode]));
+
+    for (const delta of deltas) {
+      const statsMode = statsModeByBotId.get(delta.botId) ?? "per-bot";
+      for (const plan of createBotStatsWritePlans(statsMode, delta)) {
+        await upsertBotStatsBucket(client, plan);
+      }
+    }
   }
 
   private async ensureDefaultAdmin(): Promise<UserRecord> {

@@ -435,13 +435,20 @@ async function insertMatchRecord(
   );
 
   for (const [index, participant] of input.participants.entries()) {
-    await client.query(
+    const insertParticipantResult = await client.query(
       `
-        INSERT INTO match_participants (id, match_id, bot_revision_id, team_id, slot)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO match_participants (id, match_id, bot_revision_id, stats_mode, team_id, slot)
+        SELECT $1, $2, $3, b.stats_mode, $4, $5
+        FROM bot_revisions AS br
+        JOIN bots AS b ON b.id = br.bot_id
+        WHERE br.id = $3
       `,
       [randomUUID(), matchId, participant.botRevisionId, participant.teamId, index]
     );
+
+    if ((insertParticipantResult.rowCount ?? 0) === 0) {
+      throw new Error(`Bot revision ${participant.botRevisionId} was not found while creating scheduled match ${matchId}`);
+    }
   }
 
   return matchId;

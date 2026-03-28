@@ -3,6 +3,7 @@ export type MatchMode = "live" | "queued" | "ladder" | "round-robin" | "single-e
 export type MatchStatus = "pending" | "queued" | "running" | "completed" | "failed";
 export type TournamentFormat = "round-robin" | "single-elimination" | "double-elimination";
 export type UserRole = "admin" | "user";
+export type BotStatsMode = "per-bot" | "per-variant" | "reset-on-variant";
 
 
 export interface UserRecord {
@@ -40,15 +41,46 @@ export interface BotRevision {
   createdAt: string;
 }
 
+export interface BotStatsBucket {
+  id: string;
+  botId: string;
+  botRevisionId: string | null;
+  scope: "bot" | "revision";
+  revisionVersion: number | null;
+  label: string;
+  matches: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  shotsFired: number;
+  shotsLanded: number;
+  directHits: number;
+  scans: number;
+  kills: number;
+  deaths: number;
+  damageGiven: number;
+  damageTaken: number;
+  collisions: number;
+  winRatePct: number;
+  hitRatePct: number;
+  survivalRatePct: number;
+  lastMatchAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BotRecord {
   id: string;
   ownerUserId: string | null;
   ownerEmail: string | null;
   name: string;
   description: string;
+  statsMode: BotStatsMode;
   createdAt: string;
   updatedAt: string;
   latestRevision: BotRevision;
+  statsBuckets: BotStatsBucket[];
+  activeStats: BotStatsBucket;
 }
 
 export interface ArenaRevision {
@@ -242,12 +274,14 @@ export type BotInput =
   | {
       name: string;
       description?: string;
+      statsMode?: BotStatsMode;
       language: Exclude<SupportedLanguage, "linux-x64-binary">;
       source: string;
     }
   | {
       name: string;
       description?: string;
+      statsMode?: BotStatsMode;
       language: "linux-x64-binary";
       artifactBase64: string;
       artifactFileName: string;
@@ -257,12 +291,14 @@ export type UpdateBotInput =
   | {
       name: string;
       description?: string;
+      statsMode?: BotStatsMode;
       language: Exclude<SupportedLanguage, "linux-x64-binary">;
       source: string;
     }
   | {
       name: string;
       description?: string;
+      statsMode?: BotStatsMode;
       language: "linux-x64-binary";
       artifactBase64?: string;
       artifactFileName?: string;
