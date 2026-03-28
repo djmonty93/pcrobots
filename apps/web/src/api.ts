@@ -4,31 +4,6 @@ export type MatchStatus = "pending" | "queued" | "running" | "completed" | "fail
 export type TournamentFormat = "round-robin" | "single-elimination" | "double-elimination";
 export type UserRole = "admin" | "user";
 
-const authStorageKey = "pcrobots-auth-token";
-
-function readStorage(kind: "sessionStorage" | "localStorage", key: string): string | null {
-  try {
-    return window[kind].getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(kind: "sessionStorage" | "localStorage", key: string, value: string): void {
-  try {
-    window[kind].setItem(key, value);
-  } catch {
-    // storage unavailable
-  }
-}
-
-function removeStorage(kind: "sessionStorage" | "localStorage", key: string): void {
-  try {
-    window[kind].removeItem(key);
-  } catch {
-    // storage unavailable
-  }
-}
 
 export interface UserRecord {
   id: string;
@@ -40,8 +15,6 @@ export interface UserRecord {
 }
 
 export interface AuthSession {
-  token: string;
-  expiresAt: string;
   user: UserRecord;
 }
 
@@ -264,30 +237,6 @@ interface RequestOptions {
   body?: unknown;
 }
 
-export function getAuthToken(): string | null {
-  const sessionToken = readStorage("sessionStorage", authStorageKey);
-  if (sessionToken) {
-    return sessionToken;
-  }
-
-  const legacyToken = readStorage("localStorage", authStorageKey);
-  if (legacyToken) {
-    writeStorage("sessionStorage", authStorageKey, legacyToken);
-    removeStorage("localStorage", authStorageKey);
-  }
-
-  return legacyToken;
-}
-
-export function setAuthToken(token: string): void {
-  writeStorage("sessionStorage", authStorageKey, token);
-  removeStorage("localStorage", authStorageKey);
-}
-
-export function clearAuthToken(): void {
-  removeStorage("sessionStorage", authStorageKey);
-  removeStorage("localStorage", authStorageKey);
-}
 
 export type BotInput =
   | {
@@ -328,11 +277,10 @@ export interface ArenaInput {
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 
 async function requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const authToken = getAuthToken();
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: options.method ?? "GET",
+    credentials: "include",
     headers: {
-      ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
       "content-type": "application/json"
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body)
@@ -348,7 +296,7 @@ async function requestJson<T>(path: string, options: RequestOptions = {}): Promi
   return (await response.json()) as T;
 }
 
-export function login(input: { email: string; password: string }): Promise<AuthSession> {
+export function login(input: { email: string; password: string; rememberMe: boolean }): Promise<AuthSession> {
   return requestJson<AuthSession>("/api/auth/login", {
     method: "POST",
     body: input

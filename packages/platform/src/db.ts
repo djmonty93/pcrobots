@@ -17,7 +17,7 @@ export type MatchStatus = "pending" | "queued" | "running" | "completed" | "fail
 
 const DEFAULT_ADMIN_EMAIL = "admin@pcrobots.local";
 const DEFAULT_ADMIN_PASSWORD = "Admin1-change-me-now";
-const DEFAULT_SESSION_TTL_DAYS = 30;
+const DEFAULT_SESSION_TTL_DAYS = 1;
 const MIN_PASSWORD_LENGTH = 12;
 
 export interface AccessScope {
@@ -862,7 +862,7 @@ export class Database {
     return !!user && verifyPassword(password, user.password_hash);
   }
 
-  async createSession(userId: string, ttlDays = DEFAULT_SESSION_TTL_DAYS): Promise<AuthSessionRecord> {
+  async createSession(userId: string, ttlDays = 1): Promise<AuthSessionRecord> {
     const user = await this.getUser(userId);
     if (!user || !user.isActive) {
       throw new Error(`User ${userId} is not active`);
@@ -870,10 +870,7 @@ export class Database {
 
     const token = randomBytes(32).toString("hex");
     const sessionId = randomUUID();
-    const configuredTtl = Number(process.env.PCROBOTS_SESSION_TTL_DAYS ?? "");
-    const effectiveTtl =
-      Number.isFinite(configuredTtl) && configuredTtl > 0 ? configuredTtl : ttlDays;
-    const expiresAt = createSessionExpiry(effectiveTtl);
+    const expiresAt = createSessionExpiry(ttlDays);
 
     await this.pool.query(
       `

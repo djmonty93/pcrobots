@@ -54,6 +54,26 @@ function createSession(user) {
   };
 }
 
+function parseCookies(cookieHeader) {
+  if (!cookieHeader) return {};
+  return Object.fromEntries(
+    cookieHeader.split(";").map((pair) => {
+      const [k, ...v] = pair.trim().split("=");
+      return [k.trim(), decodeURIComponent(v.join("="))];
+    })
+  );
+}
+
+function buildSessionCookie(token, rememberMe) {
+  const base = `pcrobots-session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/`;
+  const maxAge = rememberMe ? "; Max-Age=2592000" : "";
+  return `${base}${maxAge}`;
+}
+
+function clearSessionCookie() {
+  return "pcrobots-session=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/";
+}
+
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
@@ -85,9 +105,9 @@ function parseBody(request) {
 }
 
 function getSessionUser(request) {
-  const header = request.headers.authorization ?? "";
-  const [scheme, token] = header.split(/\s+/, 2);
-  if (scheme?.toLowerCase() !== "bearer" || !token) {
+  const cookies = parseCookies(request.headers["cookie"]);
+  const token = cookies["pcrobots-session"];
+  if (!token) {
     return null;
   }
 
@@ -264,7 +284,9 @@ createServer(async (request, response) => {
 
       const user = createUserRecord({ email, password, role: "user", isActive: true });
       users.push(user);
-      sendJson(response, 201, createSession(user));
+      const session = createSession(user);
+      response.setHeader("Set-Cookie", buildSessionCookie(session.token, false));
+      sendJson(response, 201, { user: session.user });
       return;
     }
 
@@ -278,16 +300,20 @@ createServer(async (request, response) => {
         return;
       }
 
-      sendJson(response, 200, createSession(user));
+      const rememberMe = body.rememberMe === true;
+      const session = createSession(user);
+      response.setHeader("Set-Cookie", buildSessionCookie(session.token, rememberMe));
+      sendJson(response, 200, { user: session.user });
       return;
     }
 
     if (request.method === "POST" && path === "/api/auth/logout") {
-      const header = request.headers.authorization ?? "";
-      const [, token] = header.split(/\s+/, 2);
+      const cookies = parseCookies(request.headers["cookie"]);
+      const token = cookies["pcrobots-session"];
       if (token) {
         sessions.delete(token);
       }
+      response.setHeader("Set-Cookie", clearSessionCookie());
       sendJson(response, 200, { ok: true });
       return;
     }

@@ -624,14 +624,19 @@ function parseCreateTournamentInput(body: unknown): CreateTournamentInput {
   };
 }
 
-function parseLoginRequest(body: unknown): { email: string; password: string } {
+function parseLoginRequest(body: unknown): { email: string; password: string; rememberMe: boolean } {
   if (!isRecord(body)) {
     badRequest("login payload must be a JSON object");
   }
 
+  const rememberMe = typeof (body as Record<string, unknown>).rememberMe === "boolean"
+    ? (body as Record<string, unknown>).rememberMe as boolean
+    : false;
+
   return {
     email: expectString(body.email, "email"),
-    password: expectString(body.password, "password")
+    password: expectString(body.password, "password"),
+    rememberMe
   };
 }
 
@@ -697,35 +702,46 @@ function toScope(user: UserRecord): AccessScope {
   return { userId: user.id, role: user.role };
 }
 
-function extractBearerToken(request: IncomingMessage): string | null {
-  const header = request.headers.authorization;
-  if (!header) {
-    return null;
-  }
+function parseCookies(cookieHeader: string | undefined): Record<string, string> {
+  if (!cookieHeader) return {};
+  return Object.fromEntries(
+    cookieHeader.split(";").map((pair) => {
+      const [k, ...v] = pair.trim().split("=");
+      return [k.trim(), decodeURIComponent(v.join("="))];
+    })
+  );
+}
 
-  const [scheme, token] = header.split(/\s+/, 2);
-  if (!scheme || !token || scheme.toLowerCase() !== "bearer") {
-    return null;
-  }
+function buildSessionCookie(token: string, rememberMe: boolean): string {
+  const isProduction = process.env.NODE_ENV === "production";
+  const base = `pcrobots-session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/`;
+  const secure = isProduction ? "; Secure" : "";
+  const maxAge = rememberMe ? "; Max-Age=2592000" : "";
+  return `${base}${secure}${maxAge}`;
+}
 
-  return token.trim();
+function clearSessionCookie(): string {
+  const isProduction = process.env.NODE_ENV === "production";
+  const secure = isProduction ? "; Secure" : "";
+  return `pcrobots-session=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/${secure}`;
 }
 
 async function requireUser(request: IncomingMessage): Promise<{ token: string; user: UserRecord; scope: AccessScope }> {
-  const token = extractBearerToken(request);
+  const cookies = parseCookies(request.headers["cookie"]);
+  const token = cookies["pcrobots-session"];
   if (!token) {
     unauthorized("authentication required");
   }
 
-  const user = await db.getUserBySessionToken(token);
+  const user = await db.getUserBySessionToken(token!);
   if (!user) {
     unauthorized("invalid or expired session");
   }
 
   return {
-    token,
-    user,
-    scope: toScope(user)
+    token: token!,
+    user: user!,
+    scope: toScope(user!)
   };
 }
 
@@ -980,9 +996,11 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         unauthorized("invalid email or password");
       }
 
-      const session = await db.createSession(user.id);
+      const ttlDays = credentials.rememberMe ? 30 : 1;
+      const session = await db.createSession(user!.id, ttlDays);
       clearAuthAttempts(rateLimitKey);
-      sendJson(response, 200, session);
+      response.setHeader("Set-Cookie", buildSessionCookie(session.token, credentials.rememberMe));
+      sendJson(response, 200, { user: session.user });
       return;
     }
 
@@ -999,9 +1017,10 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
           role: "user",
           isActive: true
         });
-        const session = await db.createSession(user.id);
+        const session = await db.createSession(user!.id, 1);  // always regular (24h) session
         clearAuthAttempts(rateLimitKey);
-        sendJson(response, 201, session);
+        response.setHeader("Set-Cookie", buildSessionCookie(session.token, false));
+        sendJson(response, 201, { user: session.user });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (
@@ -1024,6 +1043,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
 
     if (method === "POST" && path === "/api/auth/logout") {
       await db.deleteSession(auth.token);
+      response.setHeader("Set-Cookie", clearSessionCookie());
       sendJson(response, 200, { ok: true });
       return;
     }

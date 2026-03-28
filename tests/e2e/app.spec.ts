@@ -132,3 +132,37 @@ test("browser smoke covers public docs routes and unknown-path normalization", a
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByTestId("login-panel")).toBeVisible();
 });
+
+test("stay logged in persists session across browser restart simulation", async ({ page, context }) => {
+  const email = uniqueEmail("stay-logged-in");
+  const password = `StayLoggedIn${Date.now()}99`;
+
+  // Register (creates a regular 24h session — no rememberMe)
+  await page.goto("/");
+  const loginPanel = page.getByTestId("login-panel");
+  await loginPanel.getByLabel("Email").fill(email);
+  await loginPanel.getByLabel("Password").fill(password);
+  await loginPanel.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name: "User workspace" })).toBeVisible();
+
+  // Simulate browser restart by clearing cookies
+  await context.clearCookies();
+  await page.reload();
+  await expect(page.getByTestId("login-panel")).toBeVisible();
+
+  // Log in WITH "Stay logged in"
+  await loginPanel.getByLabel("Email").fill(email);
+  await loginPanel.getByLabel("Password").fill(password);
+  await page.getByLabel("Stay logged in").check();
+  await loginPanel.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "User workspace" })).toBeVisible();
+
+  // Simulate browser restart — persistent session cookie should survive
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "User workspace" })).toBeVisible();
+
+  // Explicitly clear the persistent cookie and confirm logout
+  await context.clearCookies();
+  await page.reload();
+  await expect(page.getByTestId("login-panel")).toBeVisible();
+});
