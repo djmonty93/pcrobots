@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS bots (
 );
 
 ALTER TABLE bots ADD COLUMN IF NOT EXISTS owner_user_id TEXT REFERENCES users(id);
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS stats_mode TEXT NOT NULL DEFAULT 'per-bot';
+ALTER TABLE bots DROP CONSTRAINT IF EXISTS bots_stats_mode_check;
+ALTER TABLE bots ADD CONSTRAINT bots_stats_mode_check CHECK (stats_mode IN ('per-bot', 'per-variant', 'reset-on-variant'));
 CREATE INDEX IF NOT EXISTS bots_owner_user_id_idx ON bots(owner_user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS bot_revisions (
@@ -57,6 +60,48 @@ ALTER TABLE bot_revisions ADD COLUMN IF NOT EXISTS artifact_sha256 TEXT;
 ALTER TABLE bot_revisions ADD COLUMN IF NOT EXISTS artifact_size_bytes INTEGER;
 
 CREATE INDEX IF NOT EXISTS bot_revisions_bot_id_idx ON bot_revisions(bot_id, version DESC);
+
+CREATE TABLE IF NOT EXISTS bot_stats (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  bot_revision_id TEXT REFERENCES bot_revisions(id) ON DELETE CASCADE,
+  scope TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  matches INTEGER NOT NULL DEFAULT 0,
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0,
+  draws INTEGER NOT NULL DEFAULT 0,
+  shots_fired INTEGER NOT NULL DEFAULT 0,
+  shots_landed INTEGER NOT NULL DEFAULT 0,
+  direct_hits INTEGER NOT NULL DEFAULT 0,
+  scans INTEGER NOT NULL DEFAULT 0,
+  kills INTEGER NOT NULL DEFAULT 0,
+  deaths INTEGER NOT NULL DEFAULT 0,
+  damage_given INTEGER NOT NULL DEFAULT 0,
+  damage_taken INTEGER NOT NULL DEFAULT 0,
+  collisions INTEGER NOT NULL DEFAULT 0,
+  last_match_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE bot_stats DROP CONSTRAINT IF EXISTS bot_stats_scope_check;
+ALTER TABLE bot_stats ADD CONSTRAINT bot_stats_scope_check CHECK (scope IN ('bot', 'revision'));
+ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS scope_key TEXT NOT NULL DEFAULT 'bot';
+ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS shots_fired INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS shots_landed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS direct_hits INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS scans INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS kills INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS deaths INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS damage_given INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS damage_taken INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS collisions INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bot_stats ADD COLUMN IF NOT EXISTS last_match_at TIMESTAMPTZ;
+
+CREATE UNIQUE INDEX IF NOT EXISTS bot_stats_bot_scope_key_idx ON bot_stats(bot_id, scope_key);
+CREATE INDEX IF NOT EXISTS bot_stats_bot_id_idx ON bot_stats(bot_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS bot_stats_bot_revision_id_idx ON bot_stats(bot_revision_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS arenas (
   id TEXT PRIMARY KEY,

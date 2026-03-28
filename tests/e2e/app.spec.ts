@@ -79,6 +79,10 @@ test("browser smoke covers registration, resource authoring, and live match flow
   await expect(liveMatchButton).toContainText(/completed|failed/);
   await expect(page.locator(".replay-panel")).toBeVisible();
   await expect(page.getByRole("heading", { name: liveMatchName })).toBeVisible();
+
+  await page.getByRole("button", { name: /accounts/i }).click();
+  await expect(page.getByRole("heading", { name: "Your Bot Statistics" })).toBeVisible();
+  await expect(page.getByText("matches tracked")).toBeVisible();
 });
 
 test("browser smoke covers admin account management and ownership transfer", async ({ page }) => {
@@ -114,6 +118,7 @@ test("browser smoke covers admin account management and ownership transfer", asy
   await adminUsersPanel.getByLabel("Transfer owned resources to").selectOption({ label: recipientEmail });
   await adminUsersPanel.getByRole("button", { name: "Transfer ownership" }).click();
   await expect(page.getByText(/Transferred .* bots, .* arenas, .* ladders, .* tournaments, and .* matches/)).toBeVisible();
+  await expect(adminUsersPanel.locator(".list-card").filter({ hasText: recipientEmail }).locator(".mini-stat-line")).toBeVisible();
 });
 
 test("browser smoke covers public docs routes and unknown-path normalization", async ({ page }) => {
