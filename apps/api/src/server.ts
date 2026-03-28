@@ -1017,9 +1017,10 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
           role: "user",
           isActive: true
         });
-        const session = await db.createSession(user.id);
+        const session = await db.createSession(user!.id, 1);  // always regular (24h) session
         clearAuthAttempts(rateLimitKey);
-        sendJson(response, 201, session);
+        response.setHeader("Set-Cookie", buildSessionCookie(session.token, false));
+        sendJson(response, 201, { user: session.user });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (
@@ -1042,6 +1043,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
 
     if (method === "POST" && path === "/api/auth/logout") {
       await db.deleteSession(auth.token);
+      response.setHeader("Set-Cookie", clearSessionCookie());
       sendJson(response, 200, { ok: true });
       return;
     }
