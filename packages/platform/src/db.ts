@@ -1385,51 +1385,53 @@ export class Database {
   }
 
   async getBot(botId: string, scope?: AccessScope): Promise<BotRecord | null> {
-    const params: unknown[] = [botId];
-    let scopeClause = "";
-    if (scope && !isAdmin(scope)) {
-      params.push(scope.userId);
-      scopeClause = "AND b.owner_user_id = $2";
-    }
+    return withTransaction(this.pool, async (client) => {
+      const params: unknown[] = [botId];
+      let scopeClause = "";
+      if (scope && !isAdmin(scope)) {
+        params.push(scope.userId);
+        scopeClause = "AND b.owner_user_id = $2";
+      }
 
-    const result = await this.pool.query<BotRow>(`
-      SELECT
-        b.id,
-        b.owner_user_id,
-        u.email AS owner_email,
-        b.name,
-        b.description,
-        b.stats_mode,
-        b.created_at,
-        b.updated_at,
-        br.id AS revision_id,
-        br.language AS revision_language,
-        br.source AS revision_source,
-        br.artifact_filename AS revision_artifact_filename,
-        br.artifact_sha256 AS revision_artifact_sha256,
-        br.artifact_size_bytes AS revision_artifact_size_bytes,
-        br.version AS revision_version,
-        br.created_at AS revision_created_at
-      FROM bots AS b
-      LEFT JOIN users AS u ON u.id = b.owner_user_id
-      JOIN LATERAL (
-        SELECT id, language, source, artifact_filename, artifact_sha256, artifact_size_bytes, version, created_at
-        FROM bot_revisions
-        WHERE bot_id = b.id
-        ORDER BY version DESC
-        LIMIT 1
-      ) AS br ON TRUE
-      WHERE b.id = $1
-      ${scopeClause}
-    `, params);
+      const result = await client.query<BotRow>(`
+        SELECT
+          b.id,
+          b.owner_user_id,
+          u.email AS owner_email,
+          b.name,
+          b.description,
+          b.stats_mode,
+          b.created_at,
+          b.updated_at,
+          br.id AS revision_id,
+          br.language AS revision_language,
+          br.source AS revision_source,
+          br.artifact_filename AS revision_artifact_filename,
+          br.artifact_sha256 AS revision_artifact_sha256,
+          br.artifact_size_bytes AS revision_artifact_size_bytes,
+          br.version AS revision_version,
+          br.created_at AS revision_created_at
+        FROM bots AS b
+        LEFT JOIN users AS u ON u.id = b.owner_user_id
+        JOIN LATERAL (
+          SELECT id, language, source, artifact_filename, artifact_sha256, artifact_size_bytes, version, created_at
+          FROM bot_revisions
+          WHERE bot_id = b.id
+          ORDER BY version DESC
+          LIMIT 1
+        ) AS br ON TRUE
+        WHERE b.id = $1
+        ${scopeClause}
+      `, params);
 
-    const row = result.rows[0];
-    if (!row) {
-      return null;
-    }
+      const row = result.rows[0];
+      if (!row) {
+        return null;
+      }
 
-    const statsRows = await loadBotStatsRows(this.pool, [row.id]);
-    return mapBotRow(row, statsRows);
+      const statsRows = await loadBotStatsRows(client, [row.id]);
+      return mapBotRow(row, statsRows);
+    });
   }
 
   async getBotRevision(revisionId: string, scope?: AccessScope): Promise<BotRevisionLookupRecord | null> {
