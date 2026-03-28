@@ -11,7 +11,7 @@
 - Auth token stored in `sessionStorage` under key `pcrobots-auth-token`
 - All requests send `Authorization: Bearer <token>` header
 - Server reads token from `Authorization` header
-- All sessions expire after 30 days (server TTL), regardless of "remember me" intent
+- All sessions expire after 30 days (server TTL via `PCROBOTS_SESSION_TTL_DAYS` env var), regardless of "remember me" intent
 - Token never exposed to cookies
 
 ---
@@ -71,6 +71,10 @@ On success:
   - Persistent: same + `; Max-Age=2592000`
 - Returns `{ user }` in the response body — **no token in the response body**
 
+### `POST /api/auth/register`
+
+The register handler also calls `db.createSession`. It does **not** offer "Stay logged in" — pass `ttlDays: 1` explicitly to `createSession` so the register flow creates a regular (24h) session, consistent with the tightened default.
+
 ### Auth middleware
 
 Currently reads `Authorization: Bearer <token>`. Replace with:
@@ -84,11 +88,13 @@ The rest of the middleware (hash lookup, expiry check, last_seen_at update) is u
 
 ### `POST /api/auth/logout`
 
-Set `Set-Cookie: pcrobots-session=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/` to clear the cookie.
+Two actions required:
+1. Call `db.deleteSession(token)` to invalidate the server-side session record immediately (do not rely solely on TTL expiry).
+2. Set `Set-Cookie: pcrobots-session=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/` to clear the cookie from the browser.
 
 ### `db.createSession(userId, ttlDays)`
 
-Add a `ttlDays: number` parameter (replacing the env-var default). Pass `1` for regular sessions, `30` for persistent.
+Add an explicit `ttlDays: number` parameter. The `PCROBOTS_SESSION_TTL_DAYS` environment variable is **ignored** once this parameter is wired in — the caller (login/register handler) is the source of truth for TTL. Pass `1` for regular sessions, `30` for persistent. Remove or deprecate the env-var TTL fallback.
 
 ---
 
@@ -98,10 +104,10 @@ Add a `ttlDays: number` parameter (replacing the env-var default). Pass `1` for 
 
 - Remove `getAuthToken`, `setAuthToken`, `clearAuthToken`, the legacy `localStorage` migration, and `authStorageKey`.
 - Remove the `Authorization: Bearer` header from all fetch calls.
-- Add `credentials: "include"` to all fetch calls (required so the browser sends the cookie when `VITE_API_BASE_URL` points to a different port in dev).
+- Add `credentials: "include"` to all fetch calls. This is a no-op for same-origin requests (the default `credentials: "same-origin"` already sends cookies), but becomes load-bearing if `VITE_API_BASE_URL` is ever set to an explicit cross-origin URL in development.
 - The login function accepts `rememberMe: boolean` and includes it in the request body.
 - The logout function no longer needs to clear client storage.
-- The `AuthSessionRecord` type loses the `token` field (server no longer returns it).
+- The `AuthSessionRecord` type (client-side, in `api.ts`) loses the `token` field — the server no longer returns the token in the response body. The `db.ts` `AuthSessionRecord` type retains its `token` field because the server still needs it internally when writing the cookie value.
 
 ### `apps/web/src/App.tsx`
 
@@ -126,11 +132,12 @@ The register ("Create account") flow does **not** get a "Stay logged in" option 
 
 ## E2E Test Updates
 
-`tests/e2e/app.spec.ts` currently clears `sessionStorage` to simulate a logged-out state and checks for the `pcrobots-auth-token` key. These references must be updated:
+`tests/e2e/app.spec.ts` currently uses `sessionStorage` for auth state. Update as follows:
 
-- Remove `page.evaluate(() => sessionStorage.removeItem("pcrobots-auth-token"))` calls
-- Replace with `context.clearCookies()` (Playwright API) to clear the session cookie
-- Update any assertions that check for the token in storage
+- Replace any `page.evaluate(() => sessionStorage.removeItem("pcrobots-auth-token"))` calls with `context.clearCookies()` to clear the session cookie.
+- `context` must be destructured from the Playwright test fixture alongside `page`: `test("...", async ({ page, context }) => { ... })`.
+- Update any assertions that check for the token in storage (there should be none after this change — the cookie is httpOnly and not inspectable via JS).
+- Add a test for the "Stay logged in" behavior: log in with `rememberMe: true`, call `context.clearCookies({ name: "pcrobots-session" })` to selectively clear only the session cookie, navigate to `/`, and verify the login panel is shown (session was lost). Separately, log in with `rememberMe: false` to verify regular sessions work the same way.
 
 ---
 
@@ -139,4 +146,3 @@ The register ("Create account") flow does **not** get a "Stay logged in" option 
 - "Forget this device" / session management UI
 - Multiple concurrent persistent sessions per device
 - Session listing or revocation UI
-- Changes to the register flow's session lifetime
