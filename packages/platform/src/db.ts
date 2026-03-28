@@ -17,7 +17,7 @@ export type MatchStatus = "pending" | "queued" | "running" | "completed" | "fail
 
 const DEFAULT_ADMIN_EMAIL = "admin@pcrobots.local";
 const DEFAULT_ADMIN_PASSWORD = "Admin1-change-me-now";
-const DEFAULT_SESSION_TTL_DAYS = 30;
+const DEFAULT_SESSION_TTL_DAYS = 1;
 const MIN_PASSWORD_LENGTH = 12;
 
 export interface AccessScope {
