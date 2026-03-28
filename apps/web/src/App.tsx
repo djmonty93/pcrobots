@@ -2,7 +2,6 @@ import { startTransition, useEffect, useMemo, useState } from "react";
 
 import {
   changeOwnPassword,
-  clearAuthToken,
   challengeLadder,
   createArena,
   createBot,
@@ -13,7 +12,6 @@ import {
   deleteArena,
   deleteBot,
   deleteUser,
-  getAuthToken,
   getCurrentUser,
   login,
   listArenas,
@@ -25,7 +23,6 @@ import {
   logout,
   register,
   runTournamentMatches,
-  setAuthToken,
   transferUserOwnership,
   updateArena,
   updateBot,
@@ -170,7 +167,8 @@ function createInitialTournamentState() {
 function createInitialLoginState() {
   return {
     email: "",
-    password: ""
+    password: "",
+    rememberMe: false
   };
 }
 
@@ -476,23 +474,16 @@ export function App() {
   }
 
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-
     void getCurrentUser()
       .then(async (user) => {
         await refreshData(undefined, user);
       })
       .catch((err: unknown) => {
         const status = err instanceof Error && 'status' in err ? (err as { status: number }).status : 0;
-        if (status >= 400 && status < 500) {
-          clearAuthToken();
-        } else {
+        if (status < 400 || status >= 500) {
           setError("Failed to restore session. Please reload or sign in again.");
         }
+        // 401/403 = no valid session; just fall through to landing page
         setCurrentUser(null);
         setLoading(false);
       });
@@ -661,12 +652,10 @@ export function App() {
 
     try {
       const session = await login(loginForm);
-      setAuthToken(session.token);
       setCurrentUser(session.user);
       await refreshData(undefined, session.user);
       setMessage(`Signed in as ${session.user.email}`);
     } catch (loginError) {
-      clearAuthToken();
       setCurrentUser(null);
       setError(loginError instanceof Error ? loginError.message : String(loginError));
     } finally {
@@ -681,12 +670,10 @@ export function App() {
 
     try {
       const session = await register(loginForm);
-      setAuthToken(session.token);
       setCurrentUser(session.user);
       await refreshData(undefined, session.user);
       setMessage(`Created and signed into ${session.user.email}`);
     } catch (registerError) {
-      clearAuthToken();
       setCurrentUser(null);
       setError(registerError instanceof Error ? registerError.message : String(registerError));
     } finally {
@@ -704,7 +691,6 @@ export function App() {
     } catch {
       // session may already be gone server-side
     } finally {
-      clearAuthToken();
       setCurrentUser(null);
       setUsers([]);
       setBots([]);
@@ -1156,6 +1142,14 @@ export function App() {
                     />
                   </label>
                 </div>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={loginForm.rememberMe}
+                    onChange={(e) => setLoginForm((current) => ({ ...current, rememberMe: e.target.checked }))}
+                  />
+                  Stay logged in
+                </label>
                 <div className="button-cluster">
                   <button className="primary-button" type="submit" disabled={submitting || loading}>
                     {loading ? "Checking…" : "Sign in"}
