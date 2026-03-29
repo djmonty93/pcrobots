@@ -225,6 +225,8 @@ CREATE TABLE IF NOT EXISTS match_participants (
   UNIQUE (match_id, slot)
 );
 
+ALTER TABLE match_participants ADD COLUMN IF NOT EXISTS stats_mode TEXT;
+
 UPDATE match_participants AS mp
 SET stats_mode = b.stats_mode
 FROM bot_revisions AS br
